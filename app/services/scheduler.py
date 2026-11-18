@@ -378,6 +378,21 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # ── Pharmacy OS (migration 142): daily stock alerts + ledger / register integrity (02:40 IST) and
+        # chronic refill reminders (09:30 IST). Both CAS-locked; OFF clinics are skipped inside the jobs.
+        self.scheduler.add_job(
+            self.rx_alerts_scan,
+            CronTrigger(hour=2, minute=40),
+            id="rx_alerts_scan",
+            replace_existing=True,
+        )
+        self.scheduler.add_job(
+            self.rx_refill_reminders,
+            CronTrigger(hour=9, minute=30),
+            id="rx_refill_reminders",
+            replace_existing=True,
+        )
+
         # ── DPDP: Purge completed durable-queue rows (daily 3:30 AM) ──
         # inbound_messages had no purge at all and grows one row per patient
         # message forever, each holding a raw phone number (KA-P2-10).
@@ -524,6 +539,28 @@ class SchedulerService:
         """Shutdown the scheduler."""
         self.scheduler.shutdown()
         logger.info("Scheduler shutdown")
+
+    async def rx_alerts_scan(self):
+        from app.services import rx_alerts
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("rx_alerts_scan", lease_seconds=900) as acquired:
+            if acquired:
+                try:
+                    await rx_alerts.run_scan()
+                except Exception as e:
+                    logger.error(f"RX alert scan failed: {e}")
+
+    async def rx_refill_reminders(self):
+        from app.services import rx_refills
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("rx_refill_reminders", lease_seconds=900) as acquired:
+            if acquired:
+                try:
+                    await rx_refills.run_reminders()
+                except Exception as e:
+                    logger.error(f"RX refill reminders failed: {e}")
 
     async def voice_outbound_dispatch(self):
         from app.services.distributed_lock import distributed_job_lock

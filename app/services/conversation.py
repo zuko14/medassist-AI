@@ -687,6 +687,13 @@ class ConversationManager:
             if payload.startswith(dental_plans.REVIEW_PAYLOAD_PREFIX):
                 if await dental_plans.handle_review_reply(self, clinic, phone, payload):
                     return
+            # Pharmacy refill reminder buttons (app/services/rx_refills.py, W10): only the two exact
+            # rx_refill prefixes are claimed; typed "refill" / "STOP" never reaches this branch.
+            from app.services import rx_refills
+
+            if payload.startswith((rx_refills.PREFIX_ON, rx_refills.PREFIX_OFF)):
+                if await rx_refills.handle_button(self, clinic, phone, payload):
+                    return
 
         # A tap on a TEMPLATE quick-reply arrives as message_type "button" with
         # the payload we set. The health check-in's two replies must reach the

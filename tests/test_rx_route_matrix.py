@@ -70,6 +70,11 @@ RX_ROUTES = {
     ("GET", "/admin/rx/registers/{register}"), ("GET", "/admin/rx/registers/{register}/verify"),
     ("GET", "/admin/rx/registers/{register}/export.pdf"), ("GET", "/admin/rx/registers/{register}/export.csv"),
     ("GET", "/admin/rx/batches/{batch_id}/trace"), ("POST", "/admin/rx/dispenses/{dispense_line_id}/empties"),
+    # P8 refills, alerts, expiry-return planner (142)
+    ("GET", "/admin/rx/refills/requests"), ("POST", "/admin/rx/refills/requests/{request_id}/verify"),
+    ("POST", "/admin/rx/refills/requests/{request_id}/pack"), ("POST", "/admin/rx/refills/requests/{request_id}/reject"),
+    ("GET", "/admin/rx/refills/plans"), ("POST", "/admin/rx/refills/plans/{plan_id}/cancel"),
+    ("GET", "/admin/rx/alerts"), ("POST", "/admin/rx/alerts/{alert_id}/ack"), ("GET", "/admin/rx/expiry/return-plan"),
 }
 
 
@@ -279,3 +284,27 @@ def test_p7_role_matrix(api, role, grants):  # noqa: F811
     empties = api.call("POST", f"/admin/rx/dispenses/{uuid.uuid4()}/empties", clinic,
                        {"units": 1, "returned_by": str(uuid.uuid4())}).status_code
     assert (listed, trace, empties) == P7_MATRIX[(role, grants)]
+
+
+# P8: (role, stored grants) -> expected status for: refill queue, verify an unknown request (404 when allowed),
+# alerts, the expiry-return plan of an unknown store (404 when allowed).
+P8_MATRIX = {
+    ("PHARMACY_MANAGER", ()): (200, 404, 200, 404),
+    ("PHARMACIST", ()): (200, 404, 200, 404),
+    ("PHARMACY_OPERATOR", ()): (200, 404, 200, 404),
+    ("STORE_KEEPER", ()): (200, 403, 200, 404),              # reads the queue; never verifies or packs
+    ("NURSE", ("IPD_NURSING",)): (403, 403, 403, 403),
+    ("CASHIER", ("OPD_BILLING",)): (403, 403, 403, 403),
+}
+
+
+@pytest.mark.parametrize("role,grants", sorted(P8_MATRIX))
+def test_p8_role_matrix(api, role, grants):  # noqa: F811
+    clinic = _clinic(api.conn)
+    assert api.owner_toggle(clinic, "pharmacy_enabled", True).status_code == 200
+    api.as_(api.U(role.lower(), "staff", clinic, str(uuid.uuid4()), list(grants), staff_role=role))
+    queue = api.call("GET", "/admin/rx/refills/requests", clinic).status_code
+    verify = api.call("POST", f"/admin/rx/refills/requests/{uuid.uuid4()}/verify", clinic).status_code
+    alerts = api.call("GET", "/admin/rx/alerts", clinic).status_code
+    plan = api.call("GET", "/admin/rx/expiry/return-plan", clinic, store_id=str(uuid.uuid4())).status_code
+    assert (queue, verify, alerts, plan) == P8_MATRIX[(role, grants)]

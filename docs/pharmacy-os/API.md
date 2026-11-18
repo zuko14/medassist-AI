@@ -252,6 +252,29 @@ P7 notes (as built, migration 141 — 6 routes, route pin 101):
 | POST | `/admin/rx/alerts/{id}/ack` | RX_READ | |
 | GET | `/admin/rx/dashboard?store_id&date` | RX_READ | sales today, margin (RX_ADMIN only), pending indents, near-expiry value, low-stock count, refill requests |
 | GET | `/admin/rx/reports/{kind}.csv` | RX_ADMIN | kind ∈ sales_register, purchase_register, gst_summary, hsn_summary, stock_valuation, movement, expiry, margin |
+| GET | `/admin/rx/expiry/return-plan?store_id` | RX_READ / RX_PURCHASE | A8 suggestion grouped by GRN supplier; drafts go through `POST /supplier-returns` |
+
+P8 notes (as built, migration 142 — 9 routes, route pin 110; dashboard and reports remain P9 / P10):
+- Permissions: the refill queue and plans read with `RX_READ` or `RX_DISPENSE`; verify / pack / reject / cancel need
+  `RX_DISPENSE` (or `RX_ADMIN`); verify and pack are new work (refused in WIND_DOWN). Alerts: `RX_READ`; a store alert
+  outside the login's stores is 404, clinic-wide integrity alerts are visible to every reader.
+- `POST /sales/{id}/complete` takes `refill_opt_in` (the pharmacist's tick, X16) and returns `refill_plans` (count).
+  A completed draft that a refill request packed marks the request `completed` and the plan `fulfilled`.
+- `…/verify`: the plan's original OPD prescription must still be `signed` and within `rx_validity_days` (409
+  `rx_refill_rx_invalid` / `rx_refill_rx_expired` → reject instead). `…/pack {store_id}`: creates a **draft** OPD-Rx
+  sale against that prescription with the plan's item and the originally sold quantity, FEFO batch; nothing is
+  dispensed until the counter completes it. A refill beyond what the prescription allows needs the A9 manager override
+  (`rx_over_fulfil`) at completion, as for any over-fulfilment. `…/reject {reason, notify_patient}`: plan cancelled;
+  the fixed text "…Please consult your doctor for a new prescription." is sent when `notify_patient`. Every step is a
+  compare-and-set on the request status (409 `rx_refill_request_state`). *audit* on each.
+- `GET /alerts?kind&store_id&ack` (`ack` default false = open). `POST /alerts/{id}/ack` needs a named login (403
+  otherwise); a second ack is a no-op. Kinds: low_stock, near_expiry, expired_on_hand, ledger_mismatch,
+  register_chain_break, cold_chain (reserved), stat_indent.
+- Jobs (scheduler.py, `distributed_job_lock`, IST): `rx_alerts_scan` 02:40 (every clinic not OFF; ledger mismatch and
+  register chain break also write a `[P1]` admin notification) and `rx_refill_reminders` 09:30 (ACTIVE clinics with
+  `refill_enabled`, the clinic's own WhatsApp credentials, `accepts_engagement`, template `rx_refill_due_v1` with
+  `rx_refill:<plan>` / `rx_refill_off:<plan>`; three failed sends → `expired`). A STAT indent raises an alert and a
+  notification at once. The A8 monthly drafting job is not scheduled: the planner is on demand.
 
 ## 10. Kriya Ketu read endpoints (P9)
 Ketu reuses the routes above in-process with the speaker's session. One extra read:

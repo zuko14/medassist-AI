@@ -90,6 +90,7 @@ class CompleteIn(_In):
     idempotency_key: str = Field(..., min_length=8, max_length=80)
     override_id: Optional[str] = None
     send_whatsapp_bill: bool = False              # shortcut: e-bill template lands with the WhatsApp templates (P8)
+    refill_opt_in: bool = False                   # pharmacist ticked "Patient wants refill reminders" (W10, X16)
 
 
 class ReturnLineIn(_In):
@@ -516,7 +517,7 @@ async def sale_detail(clinic_id: str, sale_id: str, settings: dict) -> dict:
     lines = await _rows(scoped_query("rx_sale_items", clinic_id).eq("sale_id", sale_id).order("line_no"))
     items = await _by_ids("rx_items", clinic_id, [ln["item_id"] for ln in lines] +
                           [ln["substituted_from_item_id"] for ln in lines],
-                          "id, item_code, brand_name, generic_id, pack_size, pack_label, base_unit, schedule, rack_location")
+                          "id, item_code, brand_name, generic_id, pack_size, pack_label, base_unit, schedule, rack_location, is_chronic")
     batches = await _by_ids("rx_batches", clinic_id, [ln["batch_id"] for ln in lines],
                             "id, batch_no, expiry_date, is_blocked")
     today, min_shelf = today_ist(), int(settings.get("min_shelf_days_at_sale", 30))

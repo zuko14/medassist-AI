@@ -382,6 +382,10 @@ class DataRetentionService:
             logger.error(f"Prescriptions anonymization error: {e}")
             results["errors"].append(f"prescriptions: {e}")
 
+        # 3b. Pharmacy refill plans / requests (RX-68 part 2) are reminder state, not clinical records. They are
+        # deleted by trg_rx_patient_erased (migration 142) the moment step 7 below redacts the patient's name, so
+        # every erasure path removes them. The statutory drug registers are immutable and are NOT touched.
+
         # 4. Delete saved family members with no OPD records, redact those with OPD records.
         # Once a family member has OPD records, NMC requires 7-year retention.
         # Non-referenced rows are pure PII and deleted. Referenced rows are redacted

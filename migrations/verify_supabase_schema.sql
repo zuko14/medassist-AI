@@ -1251,6 +1251,43 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 36. MIGRATION 142 — Pharmacy OS refills, alerts, integrity checks, item metrics (RX-M9)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tbl int;
+    v_con int;
+    v_fn int;
+BEGIN
+    SELECT count(*) INTO v_tbl FROM pg_class
+     WHERE relname IN ('rx_refill_plans', 'rx_refill_requests', 'rx_alerts', 'rx_item_metrics')
+       AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M142', 'Tables: refill plans, refill requests, alerts, item metrics (RLS forced)',
+            CASE WHEN v_tbl = 4 THEN 'PASS' ELSE 'FAIL' END, v_tbl || ' of 4 present');
+
+    SELECT count(*) INTO v_con FROM pg_constraint
+     WHERE conname IN ('rx_refill_plans_sale_item_key', 'rx_refill_plans_dates', 'rx_refill_requests_reject_reason',
+                       'rx_refill_requests_packed_sale', 'rx_refill_requests_plan_fk', 'rx_alerts_ack_shape',
+                       'rx_item_metrics_pkey')
+       AND convalidated;
+    SELECT v_con + count(*) INTO v_con FROM pg_indexes WHERE indexname IN ('uq_rx_alerts_dedupe', 'uq_rx_refill_requests_open');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M142', 'Constraints: one plan per sold line, one open request per plan, reject reason, alert dedupe per day',
+            CASE WHEN v_con = 9 THEN 'PASS' ELSE 'FAIL' END, v_con || ' of 9 present');
+
+    SELECT (to_regprocedure('rx_ledger_check(uuid)') IS NOT NULL)::int
+         + (to_regprocedure('rx_alerts_scan(uuid,date,integer)') IS NOT NULL)::int
+         + (to_regprocedure('rx_expiry_return_plan(uuid,uuid,date)') IS NOT NULL)::int
+         + (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'patients'::regclass AND tgname = 'trg_rx_patient_erased')::int
+         + (SELECT count(*) FROM pg_proc WHERE proname = 'rx_purge_clinic' AND prosrc LIKE '%rx_refill_plans%')::int
+      INTO v_fn;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M142', 'Functions: ledger check, alert scan, expiry-return plan, DPDP erasure trigger, purge v9',
+            CASE WHEN v_fn = 5 THEN 'PASS' ELSE 'FAIL' END, v_fn || ' of 5 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

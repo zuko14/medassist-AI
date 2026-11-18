@@ -591,3 +591,16 @@ def render_labels_pdf(grn: dict, copies: str) -> bytes:
     if not count:
         pdf.add_page()
     return bytes(pdf.output())
+
+
+# ── expiry-return planner (A8 / RX-76) ──────────────────────────────────────
+
+async def return_plan(clinic_id: str, store_id: str) -> list[dict]:
+    """Batches on this store's shelf inside their GRN supplier's return window (or already expired), grouped by that
+    supplier. A suggestion only: the store keeper drafts the return through POST /supplier-returns."""
+    from app.utils.helpers import today_ist
+    try:
+        return (await sb(supabase.rpc("rx_expiry_return_plan", {
+            "p_clinic_id": clinic_id, "p_store_id": store_id, "p_today": today_ist().isoformat()}))).data or []
+    except Exception as e:
+        raise_for(e)

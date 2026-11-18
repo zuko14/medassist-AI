@@ -1,8 +1,8 @@
 """Kriya Pharmacy OS API — foundation (134, RX-05), drug master (135, RX-13…15), stock (136, RX-18…20),
 purchase (137, RX-23…26, RX-71), counter sales (138, RX-29…35, RX-69/70/72/73/77/81/82), inpatient pharmacy (139, RX-38…40),
 transfers / par levels / stock audits (140, RX-42…46, RX-78), statutory registers / batch recall / narcotic empties
-(141, RX-49, RX-50, RX-74, RX-79).
-Design: docs/pharmacy-os/API.md §0–§8, SECURITY.md §2–§3.
+(141, RX-49, RX-50, RX-74, RX-79), refills / alerts / expiry-return planner (142, RX-56…RX-59, RX-76).
+Design: docs/pharmacy-os/API.md §0–§9, SECURITY.md §2–§3.
 
 Every route: permission -> enforce_clinic_access -> rx_access(clinic) ->
 (new work) wind-down rule -> store / branch scope -> service. Zero-LLM.
@@ -17,8 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.database import sb, scoped_query
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
-from app.services import (rx, rx_audit, rx_catalogue, rx_gs1, rx_ipd, rx_pos, rx_pos_docs, rx_purchase,
-                          rx_registers, rx_stock, rx_transfers)
+from app.services import (rx, rx_alerts, rx_audit, rx_catalogue, rx_gs1, rx_ipd, rx_pos, rx_pos_docs, rx_purchase,
+                          rx_refills, rx_registers, rx_stock, rx_transfers)
 from app.services.rx_catalogue import BarcodeIn, GenericIn, ItemIn, ItemPatch, ManufacturerIn
 from app.services.rx_purchase import CreditIn, GrnIn, GrnPatch, POIn, POPatch, ReturnIn, SupplierIn, SupplierPatch
 from app.services.permissions import allowed_store_ids, holds_rx_permission, resolve_owned_branch
@@ -898,8 +898,13 @@ async def complete_sale(sale_id: uuid.UUID, body: rx_pos.CompleteIn, request: Re
         await _audit(user, request, "rx_sale_complete", "rx_sale", str(sale_id),
                      {"sale_number": out["sale_number"], "net_paise": out["net_paise"],
                       "modes": sorted({p.mode for p in body.payments}), "override": out.get("override_used")})
+    refill_plans = []
+    if not out.get("replayed"):
+        await rx_refills.mark_fulfilled(scope, str(sale_id))          # a packed refill completed at the counter
+        if body.refill_opt_in:                                         # W10 step 1, pharmacist's tick (X16)
+            refill_plans = await rx_refills.create_plans(scope, str(sale_id), _actor(user)[0], rx.get_rx_settings(clinic))
     detail = await rx_pos.sale_detail(scope, str(sale_id), rx.get_rx_settings(clinic))
-    return {**detail, "replayed": out.get("replayed", False),
+    return {**detail, "replayed": out.get("replayed", False), "refill_plans": len(refill_plans),
             "receipt_url": f"/admin/rx/sales/{sale_id}/receipt?format={rx.get_rx_settings(clinic)['receipt_format']}"}
 
 
@@ -1063,8 +1068,10 @@ async def ipd_raise_indent(body: rx_ipd.IndentIn, request: Request, clinic_id: s
     if not out.get("replayed"):
         await _audit(user, request, "rx_indent_raise", "rx_ipd_indent", out["indent_id"],
                      {"indent_number": out["indent_number"], "priority": body.priority, "lines": len(body.lines)})
-    return {**await rx_ipd.indent_detail(scope, await rx_ipd.get_indent_row(scope, out["indent_id"])),
-            "replayed": out.get("replayed", False)}
+    detail = await rx_ipd.indent_detail(scope, await rx_ipd.get_indent_row(scope, out["indent_id"]))
+    if body.priority == "stat" and not out.get("replayed"):
+        await rx_alerts.stat_indent(scope, detail)
+    return {**detail, "replayed": out.get("replayed", False)}
 
 
 @router.get("/ipd/indents")
@@ -1485,3 +1492,98 @@ async def record_empties(dispense_line_id: uuid.UUID, body: rx_registers.Empties
     await _audit(user, request, "rx_empties_received", "rx_dispense_line", str(dispense_line_id),
                  {"units": body.units, "returned_by": str(body.returned_by), "outstanding_units": out["outstanding_units"]})
     return out
+
+
+# ── refills (142, W10, RX-57…RX-59), alerts (RX-56), expiry-return planner (A8, RX-76) ──
+REFILL_READ = ("RX_READ", "RX_DISPENSE", "RX_ADMIN")
+REFILL_WORK = ("RX_DISPENSE", "RX_ADMIN")
+ALERT_READ = ("RX_READ", "RX_ADMIN")
+
+
+@router.get("/refills/requests")
+async def list_refill_requests(status_: Optional[rx_refills.RequestStatus] = Query(None, alias="status"),
+                               limit: int = Query(100, ge=1, le=500), clinic_id: str = "default",
+                               user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *REFILL_READ)
+    return {"requests": await rx_refills.list_requests(scope, status_, limit)}
+
+
+@router.post("/refills/requests/{request_id}/verify")
+async def verify_refill(request_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *REFILL_WORK, new_work=True)
+    out = await rx_refills.verify(scope, await rx_refills.get_request(scope, str(request_id)), rx.get_rx_settings(clinic),
+                                  _actor(user)[0])
+    await _audit(user, request, "rx_refill_verify", "rx_refill_request", str(request_id), {})
+    return out
+
+
+@router.post("/refills/requests/{request_id}/pack")
+async def pack_refill(request_id: uuid.UUID, body: rx_refills.PackIn, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    """A DRAFT counter sale (FEFO) for the pharmacist to complete at the counter; nothing leaves the shelf here."""
+    scope, clinic = await _rx_scope(user, clinic_id, *REFILL_WORK, new_work=True)
+    store = _store_for(user, await rx.get_store(scope, body.store_id))
+    out = await rx_refills.pack(scope, await rx_refills.get_request(scope, str(request_id)), store, _actor(user),
+                                rx.get_rx_settings(clinic))
+    await _audit(user, request, "rx_refill_pack", "rx_refill_request", str(request_id), {"sale_id": out["sale_id"]})
+    return out
+
+
+@router.post("/refills/requests/{request_id}/reject")
+async def reject_refill(request_id: uuid.UUID, body: rx_refills.RejectIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *REFILL_WORK)
+    out = await rx_refills.reject(scope, clinic, await rx_refills.get_request(scope, str(request_id)), body)
+    await _audit(user, request, "rx_refill_reject", "rx_refill_request", str(request_id),
+                 {"reason": body.reason, "notified": body.notify_patient})
+    return out
+
+
+@router.get("/refills/plans")
+async def list_refill_plans(patient_id: Optional[uuid.UUID] = None,
+                            status_: Optional[rx_refills.PlanStatus] = Query(None, alias="status"),
+                            limit: int = Query(200, ge=1, le=500), clinic_id: str = "default",
+                            user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *REFILL_READ)
+    return {"plans": await rx_refills.list_plans(scope, str(patient_id) if patient_id else None, status_, limit)}
+
+
+@router.post("/refills/plans/{plan_id}/cancel")
+async def cancel_refill_plan(plan_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                             user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *REFILL_WORK)
+    out = await rx_refills.cancel_plan(scope, await rx_refills.get_plan(scope, str(plan_id)))
+    await _audit(user, request, "rx_refill_plan_cancel", "rx_refill_plan", str(plan_id), {})
+    return out
+
+
+@router.get("/alerts")
+async def list_alerts(kind: Optional[Literal["low_stock", "near_expiry", "expired_on_hand", "ledger_mismatch",
+                                             "register_chain_break", "cold_chain", "stat_indent"]] = None,
+                      store_id: Optional[uuid.UUID] = None, ack: Optional[bool] = False,
+                      limit: int = Query(200, ge=1, le=500), clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *ALERT_READ)
+    return {"alerts": await rx_alerts.list_alerts(scope, await _store_ids(user, scope, store_id), kind, ack, limit)}
+
+
+@router.post("/alerts/{alert_id}/ack")
+async def ack_alert(alert_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                    user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *ALERT_READ)
+    alert = await rx_alerts.get_alert(scope, str(alert_id))
+    if alert.get("store_id"):
+        _store_for(user, await rx.get_store(scope, str(alert["store_id"])))
+    out = await rx_alerts.acknowledge(scope, alert, _actor(user)[0])
+    await _audit(user, request, "rx_alert_ack", "rx_alert", str(alert_id), {"kind": alert["kind"]})
+    return out
+
+
+@router.get("/expiry/return-plan")
+async def expiry_return_plan(store_id: uuid.UUID, clinic_id: str = "default",
+                             user: AdminUser = Depends(verify_credentials)):
+    """A8: a suggestion only. Drafting goes through POST /supplier-returns; nothing is dispatched from here."""
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_READ)
+    store = _store_for(user, await rx.get_store(scope, str(store_id)))
+    return {"store": store, "suppliers": await rx_purchase.return_plan(scope, str(store_id))}

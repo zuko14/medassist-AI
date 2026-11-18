@@ -3760,6 +3760,14 @@
         @media (max-width: 760px) { .rxr-filters .field { min-width: calc(50% - 6px); flex: 1; } .rxr-hide-sm { display: none; }
             #pg-rxregisters td[data-label]::before { content: attr(data-label) " "; color: var(--text3); font-size: 0.72rem; } }
         /* RX:registers:END */
+        /* RX:refills:START — Refills & Alerts (migration 142; docs/pharmacy-os/WORKFLOWS.md W10, A8) */
+        .rxf-kind { display: inline-flex; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; border: 1px solid var(--border2); white-space: nowrap; }
+        .rxf-kind.k-ledger_mismatch, .rxf-kind.k-register_chain_break, .rxf-kind.k-expired_on_hand, .rxf-kind.k-stat_indent { color: var(--red); background: var(--red-bg); border-color: var(--red); }
+        .rxf-kind.k-near_expiry, .rxf-kind.k-low_stock, .rxf-kind.k-cold_chain { color: var(--amber); background: var(--amber-bg); border-color: var(--amber); }
+        .rxf-sup { border: 1px solid var(--border); border-radius: 14px; padding: 12px; margin-bottom: 12px; background: var(--surface2); }
+        .rxf-sup header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        @media (max-width: 760px) { #pg-rxrefills td[data-label]::before { content: attr(data-label) " "; color: var(--text3); font-size: 0.72rem; } }
+        /* RX:refills:END */
     </style>
 </head>
 <body>
@@ -4126,6 +4134,11 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"></path><path d="M4 17a3 3 0 0 1 3-3h12M8 8h7M8 11h5"></path></svg></span><span>Drug Registers</span>
             </div>
             <!-- RX:registers:END -->
+            <!-- RX:refills:START -->
+            <div class="nav-link" tabindex="0" data-page="rxrefills" data-rx="nav RX_READ RX_DISPENSE RX_ADMIN" style="display:none" onclick="go('rxrefills',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"></path><path d="M21 4v5h-5"></path><path d="M12 8v4l3 2"></path></svg></span><span>Refills &amp; Alerts</span>
+            </div>
+            <!-- RX:refills:END -->
             <!-- RX:stock:START -->
             <div class="nav-link" tabindex="0" data-page="rxstock" data-rx="nav RX_READ" style="display:none" onclick="go('rxstock',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"></path><path d="m3 8 9 5 9-5"></path><path d="M12 13v8"></path></svg></span><span>Stock &amp; Expiry</span>
@@ -8184,6 +8197,18 @@
             </aside>
         </div>
         <!-- RX:registers:END -->
+        <!-- RX:refills:START — Refills & Alerts page (WORKFLOWS W10, ADVANCED-FEATURES A8, page rxrefills) -->
+        <div id="pg-rxrefills" class="sec">
+            <div class="page-head"><div><h2>Refills &amp; Alerts</h2><p>Refill requests patients sent from their WhatsApp reminder, the reminder plans behind them, today's stock and integrity alerts, and batches you can still return to the supplier.</p></div></div>
+            <div class="rx-tabs" role="tablist" aria-label="Refills and alerts">
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="requests" aria-selected="false" onclick="rxref.tab('requests')">Refill requests</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="plans" aria-selected="false" onclick="rxref.tab('plans')">Refill plans</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="alerts" aria-selected="false" onclick="rxref.tab('alerts')">Alerts &amp; integrity</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="planner" aria-selected="false" onclick="rxref.tab('planner')">Expiry returns</button>
+            </div>
+            <div class="card"><div id="rxfBody" aria-live="polite"></div></div>
+        </div>
+        <!-- RX:refills:END -->
         <!-- DX:foundation:START — DX Setup page (docs/diagnostic-os/UI.md, page dxsetup) -->
         <div id="pg-dxsetup" class="sec">
             <div class="page-head">
@@ -11775,7 +11800,7 @@ const rxpos = {
         try { rxpos.rxMap = []; rxpos.set(await api(`/admin/rx/sales/${encodeURIComponent(id)}`)); } catch (e) { toast(e.message, true); }
     },
     set(s) { rxpos.sale = s; rxpos.idem = s && s.status === 'draft' ? (rxpos.idem && rxpos.idemFor === s.id ? rxpos.idem : 'pos-' + s.id) : null; rxpos.idemFor = s && s.id; rxpos.render(); },
-    newBill() { rxpos.sale = null; rxpos.override = null; rxpos.rxMap = []; rxpos.render(); document.getElementById('rxpsQ').focus(); },
+    newBill() { rxpos.sale = null; rxpos.override = null; rxpos.refillOptIn = false; rxpos.rxMap = []; rxpos.render(); document.getElementById('rxpsQ').focus(); },
     linesBody() {
         return (rxpos.sale ? rxpos.sale.lines : []).map(l => ({ item_id: l.item_id, batch_id: l.batch_id, qty_units: l.qty_units,
             opd_prescription_item_id: l.opd_prescription_item_id || null, substituted_from_item_id: l.substituted_from_item_id || null,
@@ -11851,6 +11876,7 @@ const rxpos = {
             ${draft ? `<div class="rxpos-tender">${['cash', 'upi', 'card'].map((m, i) => `<div><label for="rxpsPay_${m}">${m.toUpperCase()} <kbd>F${6 + i}</kbd></label><input id="rxpsPay_${m}" inputmode="decimal" placeholder="0.00"></div>`).join('')}</div>
                 <input id="rxpsRef" placeholder="UPI / card reference (optional)" maxlength="60" style="width:100%; margin-top:8px; padding:8px; border-radius:10px; border:1px solid var(--border); background:var(--surface2); color:var(--text)">
                 ${rxpos.override ? `<p class="rx-badge e-ok" style="margin-top:8px">Override ready: ${esc(rxpos.override.action)} by ${esc(rxpos.override.approver_name)}</p>` : ''}
+                ${/* RX:refills:START — W10 / X16: the pharmacist asks the patient; nothing is ticked by default */''}${s.patient_id && s.lines.some(l => (l.item || {}).is_chronic && !['H1', 'X', 'narcotic', 'psychotropic'].includes((l.item || {}).schedule)) ? `<label class="check" style="margin-top:8px"><input type="checkbox" id="rxpsRefill" ${rxpos.refillOptIn ? 'checked' : ''} onchange="rxpos.refillOptIn = this.checked"> Patient wants refill reminders (WhatsApp)</label>` : ''}${/* RX:refills:END */''}
                 <button type="button" class="btn btn-accent rxpos-complete" onclick="rxpos.complete()" ${s.lines.length ? '' : 'disabled'}>Complete &amp; print <span class="rxpos-keys"><kbd>Enter</kbd></span></button>
                 <div class="dx-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.park()">Park <span class="rxpos-keys"><kbd>Ctrl+P</kbd></span></button>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.overrideForm('discount_over_cap')">Manager override <span class="rxpos-keys"><kbd>Ctrl+O</kbd></span></button>
@@ -11937,10 +11963,10 @@ const rxpos = {
         const btn = document.querySelector('#rxpsSide .rxpos-complete');
         if (btn) btn.disabled = true;
         try {
-            const r = await apiPost(`/admin/rx/sales/${encodeURIComponent(s.id)}/complete`, { payments, idempotency_key: rxpos.idem, override_id: rxpos.override ? rxpos.override.override_id : null });
-            rxpos.override = null;
+            const r = await apiPost(`/admin/rx/sales/${encodeURIComponent(s.id)}/complete`, { payments, idempotency_key: rxpos.idem, override_id: rxpos.override ? rxpos.override.override_id : null, refill_opt_in: !!(rxpos.refillOptIn && document.getElementById('rxpsRefill')) });
+            rxpos.override = null; rxpos.refillOptIn = false;
             rxpos.set(r);
-            toast(`Bill ${r.sale_number} completed`);
+            toast(`Bill ${r.sale_number} completed${r.refill_plans ? ` · ${r.refill_plans} refill reminder${r.refill_plans > 1 ? 's' : ''} set` : ''}`);
             rxpos.printDialog();
         } catch (e) { toast(e.message, true); if (btn) btn.disabled = false; }
     },
@@ -12823,6 +12849,139 @@ const rxreg = {
     close() { document.getElementById('rxrDrawer').classList.remove('open'); if (rxreg.lastFocus && rxreg.lastFocus.focus) rxreg.lastFocus.focus(); },
 };
 /* RX:registers:END */
+
+/* RX:refills:START — Refills & Alerts (migration 142; WORKFLOWS W10, A8). Verify checks the original prescription is
+   still valid; Pack only drafts a counter bill (FEFO) that the pharmacist completes at the POS; nothing here dispenses.
+   The expiry planner only suggests: "Create draft return" goes through the ordinary supplier-return draft. */
+const RXF_REQ = { new: 'New', verified: 'Verified', packed: 'Packed', completed: 'Completed', rejected: 'Rejected' };
+const RXF_KIND = { low_stock: 'Low stock', near_expiry: 'Near expiry', expired_on_hand: 'Expired on shelf', ledger_mismatch: 'Ledger mismatch', register_chain_break: 'Register tampered', cold_chain: 'Cold chain', stat_indent: 'STAT indent' };
+const rxref = {
+    view: 'requests', stores: null, plan: null,
+    body(html) { document.getElementById('rxfBody').innerHTML = html; },
+    work() { return rxCan('RX_DISPENSE') || rxCan('RX_ADMIN'); },
+    run: (btn, fn, ok) => rxind.run(btn, fn, ok),
+    tbl(head, rows, empty) {
+        return rows.length ? `<div class="tbl-wrap"><table class="rxi-orders"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td data-label="${head[i] || ''}">${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : `<p class="muted">${empty}</p>`;
+    },
+    async load() {
+        applyRxGates();
+        if (!rxref.stores) { try { rxref.stores = (await api('/admin/rx/stores')).stores.filter(s => s.is_active); } catch (e) { rxref.stores = []; } }
+        return rxref.tab(rxref.view);
+    },
+    tab(t) {
+        rxref.view = t;
+        document.querySelectorAll('#pg-rxrefills [role="tab"]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
+        return ({ requests: rxref.loadRequests, plans: rxref.loadPlans, alerts: rxref.loadAlerts, planner: rxref.loadPlanner })[t]();
+    },
+    storeSelect(id) {
+        return `<select id="${id}">${(rxref.stores || []).map(s => `<option value="${esc(s.id)}">${esc(s.code)} · ${esc(s.name)}</option>`).join('')}</select>`;
+    },
+    // ── refill requests queue ──
+    async loadRequests() {
+        rxref.body(loading());
+        let r;
+        try { r = await api('/admin/rx/refills/requests'); } catch (e) { rxref.body(`<p class="muted">${esc(e.message)}</p>`); return; }
+        const w = rxref.work();
+        rxref.body(`<div class="rxp-foot" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><span class="rx-sub">Verify the original prescription, then Pack: a draft bill opens at the counter for you to check and complete.</span>
+            ${w ? `<div class="field" style="margin:0"><label for="rxfStore">Pack from</label>${rxref.storeSelect('rxfStore')}</div>` : ''}</div>
+            ${rxref.tbl(['Patient', 'Medicine', 'Asked', 'Status', ''], r.requests.map(q => [
+                `<b>${esc((q.patient || {}).name || '—')}</b><br><small class="rx-sub">${esc((q.patient || {}).mrn || '')} ${esc((q.patient || {}).phone_masked || '')}</small>`,
+                `${esc((q.item || {}).brand_name || '—')}<br><small class="rx-sub">covered until ${esc((q.plan || {}).covered_until || '—')}</small>`,
+                `${esc(rxind.when(q.created_at))}<br><small class="rx-sub">${esc(q.channel)} · ${esc(q.fulfilment === 'home_delivery' ? 'home delivery' : 'pickup')}</small>`,
+                esc(RXF_REQ[q.status] || q.status),
+                w ? (q.status === 'new' ? `<button type="button" class="btn btn-accent btn-sm" onclick="rxref.verify('${esc(q.id)}', this)">Verify</button> <button type="button" class="btn btn-ghost btn-sm" onclick="rxref.reject('${esc(q.id)}', this)">Reject</button>`
+                    : q.status === 'verified' ? `<button type="button" class="btn btn-accent btn-sm" onclick="rxref.pack('${esc(q.id)}', this)">Pack</button> <button type="button" class="btn btn-ghost btn-sm" onclick="rxref.reject('${esc(q.id)}', this)">Reject</button>`
+                    : q.status === 'packed' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxref.openSale('${esc(q.sale_id)}')">Open at counter</button>` : '') : '']),
+                'No refill requests waiting. Patients ask for a refill from their WhatsApp reminder.')}`);
+    },
+    async verify(id, btn) {
+        if (await rxref.run(btn, () => apiPost(`/admin/rx/refills/requests/${encodeURIComponent(id)}/verify`, {}), 'Prescription still valid: verified')) rxref.loadRequests();
+    },
+    async pack(id, btn) {
+        const store = (document.getElementById('rxfStore') || {}).value;
+        if (!store) { toast('Choose the store to pack from.', true); return; }
+        const r = await rxref.run(btn, () => apiPost(`/admin/rx/refills/requests/${encodeURIComponent(id)}/pack`, { store_id: store }), 'Packed: a draft bill is ready at the counter');
+        if (r) rxref.openSale(r.sale_id);
+    },
+    async reject(id, btn) {
+        const reason = (prompt('Why can this refill not be filled? The patient is told to see their doctor. (3+ characters)') || '').trim();
+        if (reason.length < 3) return;
+        if (await rxref.run(btn, () => apiPost(`/admin/rx/refills/requests/${encodeURIComponent(id)}/reject`, { reason, notify_patient: true }), 'Rejected; patient informed')) rxref.loadRequests();
+    },
+    openSale(id) {
+        go('rxpos', document.querySelector('[data-page=rxpos]'));
+        setTimeout(async () => { try { rxpos.set(await api(`/admin/rx/sales/${encodeURIComponent(id)}`)); } catch (e) { toast(e.message, true); } }, 300);
+    },
+    // ── refill plans ──
+    async loadPlans() {
+        rxref.body(loading());
+        let r;
+        try { r = await api('/admin/rx/refills/plans'); } catch (e) { rxref.body(`<p class="muted">${esc(e.message)}</p>`); return; }
+        const w = rxref.work();
+        rxref.body(`<p class="rx-sub">Plans are made only when you tick “Patient wants refill reminders” at the counter, for chronic medicines with a clear dose (OD / BD / TDS / QID / HS). Never for Schedule H1, X, narcotic or psychotropic medicines.</p>
+            ${rxref.tbl(['Patient', 'Medicine', 'Covered until', 'Reminder', 'Status', ''], r.plans.map(p => [
+                `<b>${esc((p.patient || {}).name || '—')}</b><br><small class="rx-sub">${esc((p.patient || {}).phone_masked || '')}</small>`,
+                `${esc((p.item || {}).brand_name || '—')}<br><small class="rx-sub">${esc(p.units_per_day)} a day</small>`,
+                esc(p.covered_until), esc(p.remind_on), esc(p.status),
+                w ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxref.cancelPlan('${esc(p.id)}', this)">Cancel</button>` : '']),
+                'No active refill plans.')}`);
+    },
+    async cancelPlan(id, btn) {
+        if (!confirm('Stop refill reminders for this medicine?')) return;
+        if (await rxref.run(btn, () => apiPost(`/admin/rx/refills/plans/${encodeURIComponent(id)}/cancel`, {}), 'Reminders stopped')) rxref.loadPlans();
+    },
+    // ── alerts & integrity ──
+    async loadAlerts() {
+        rxref.body(loading());
+        let r;
+        try { r = await api('/admin/rx/alerts?ack=false'); } catch (e) { rxref.body(`<p class="muted">${esc(e.message)}</p>`); return; }
+        const detail = a => {
+            const p = a.payload || {};
+            if (a.kind === 'low_stock') return `${esc(p.brand_name || '')}: ${esc(p.sellable_units)} left, reorder at ${esc(p.reorder_level_units)}`;
+            if (a.kind === 'near_expiry' || a.kind === 'expired_on_hand') return `${esc(p.brand_name || '')} batch ${esc(p.batch_no || '')}: ${esc(p.qty_units)} units, expiry ${esc(p.expiry_date)}`;
+            if (a.kind === 'ledger_mismatch') return `Balance ${esc(p.balance_units)} ≠ ledger ${esc(p.ledger_units)}. Stop stock work and contact support.`;
+            if (a.kind === 'register_chain_break') return `${esc(p.register)} register broken at entry ${esc(p.first_bad_seq)}. Do not edit; inform the manager.`;
+            if (a.kind === 'stat_indent') return `${esc(p.indent_number || '')} ${p.ward ? '· ' + esc(p.ward) : ''} ${p.bed ? '· bed ' + esc(p.bed) : ''}`;
+            return esc(JSON.stringify(p));
+        };
+        const store = id => { const s = (rxref.stores || []).find(x => x.id === id); return s ? esc(s.code) : 'Clinic-wide'; };
+        rxref.body(`<p class="rx-sub">Checked every night: low stock, near expiry, expired stock on the shelf, the stock ledger against the balances, and every drug register's hash chain. Red items need action today.</p>
+            ${rxref.tbl(['Alert', 'Details', 'Store', 'Date', ''], r.alerts.map(a => [
+                `<span class="rxf-kind k-${esc(a.kind)}">${esc(RXF_KIND[a.kind] || a.kind)}</span>`, detail(a), store(a.store_id), esc(a.alert_date),
+                `<button type="button" class="btn btn-ghost btn-sm" onclick="rxref.ack('${esc(a.id)}', this)">Acknowledge</button>`]),
+                'No open alerts. ✓')}`);
+    },
+    async ack(id, btn) {
+        if (await rxref.run(btn, () => apiPost(`/admin/rx/alerts/${encodeURIComponent(id)}/ack`, {}), 'Acknowledged')) rxref.loadAlerts();
+    },
+    // ── expiry-return planner (A8) ──
+    async loadPlanner(storeId) {
+        if (!(rxref.stores || []).length) { rxref.body('<p class="muted">No store to plan for.</p>'); return; }
+        storeId = storeId || (document.getElementById('rxfPlanStore') || {}).value || rxref.stores[0].id;
+        rxref.body(loading());
+        let r;
+        try { r = await api('/admin/rx/expiry/return-plan?store_id=' + encodeURIComponent(storeId)); } catch (e) { rxref.body(`<p class="muted">${esc(e.message)}</p>`); return; }
+        rxref.plan = r;
+        const canDraft = rxCan('RX_PURCHASE') || rxCan('RX_ADMIN');
+        rxref.body(`<div class="field" style="max-width:320px"><label for="rxfPlanStore">Store</label><select id="rxfPlanStore" onchange="rxref.loadPlanner(this.value)">${rxref.stores.map(s => `<option value="${esc(s.id)}" ${s.id === storeId ? 'selected' : ''}>${esc(s.code)} · ${esc(s.name)}</option>`).join('')}</select></div>
+            <p class="rx-sub">Batches inside their supplier's return window (or already expired), grouped by the supplier they came from. Nothing is sent: a draft return is created for you to check and dispatch.</p>
+            ${r.suppliers.length ? r.suppliers.map((g, gi) => {
+                const lines = g.lines.filter(l => l.qty_units - l.drafted_units > 0);
+                return `<section class="rxf-sup"><header><b>${esc(g.supplier_name)}</b><span class="rx-sub">returns accepted ${g.return_window_days != null ? esc(g.return_window_days) + ' days before expiry' : 'only after expiry'}</span>
+                    ${canDraft && lines.length ? `<button type="button" class="btn btn-accent btn-sm" onclick="rxref.draftReturn(${gi}, this)">Create draft return</button>` : ''}</header>
+                    ${rxref.tbl(['Medicine', 'Batch', 'Expiry', 'On shelf', 'Already drafted'], g.lines.map(l => [esc(l.brand_name), esc(l.batch_no),
+                        `${esc(l.expiry_date)}<br><small class="rx-sub">${l.expired ? 'expired' : esc(l.days_left) + ' days left'}</small>`, esc(l.qty_units), esc(l.drafted_units)]), '')}</section>`;
+            }).join('') : '<p class="muted">Nothing on this shelf is inside a supplier return window. ✓</p>'}`);
+    },
+    async draftReturn(gi, btn) {
+        const g = rxref.plan.suppliers[gi], store = document.getElementById('rxfPlanStore').value;
+        const lines = g.lines.map(l => ({ batch_id: l.batch_id, qty_units: l.qty_units - l.drafted_units })).filter(l => l.qty_units > 0);
+        const reason = g.lines.some(l => l.expired) && g.lines.every(l => l.expired) ? 'expired' : 'near_expiry';
+        const r = await rxref.run(btn, () => apiPost('/admin/rx/supplier-returns', { store_id: store, supplier_id: g.supplier_id, reason, lines }), 'Draft supplier return created — review and dispatch it in Purchase & GRN');
+        if (r) rxref.loadPlanner(store);
+    },
+};
+/* RX:refills:END */
 
 /* DX:foundation:START — Diagnostic OS (migration 125). Mirrors app.services.permissions
    holds_dx_permission; the server re-checks every call, hiding here is convenience only. */
@@ -20755,7 +20914,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ /* RX:pos:START */, rxpos: () => rxpos.load() /* RX:pos:END */ /* RX:ipd:START */, rxindents: () => rxind.load() /* RX:ipd:END */ /* RX:transfers:START */, rxtransfers: () => rxtr.load() /* RX:transfers:END */ /* RX:audit:START */, rxaudit: () => rxaud.load() /* RX:audit:END */ /* RX:registers:START */, rxregisters: () => rxreg.load() /* RX:registers:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ /* RX:pos:START */, rxpos: () => rxpos.load() /* RX:pos:END */ /* RX:ipd:START */, rxindents: () => rxind.load() /* RX:ipd:END */ /* RX:transfers:START */, rxtransfers: () => rxtr.load() /* RX:transfers:END */ /* RX:audit:START */, rxaudit: () => rxaud.load() /* RX:audit:END */ /* RX:registers:START */, rxregisters: () => rxreg.load() /* RX:registers:END */ /* RX:refills:START */, rxrefills: () => rxref.load() /* RX:refills:END */ };
     if (loaders[page]) loaders[page]();
 }
 

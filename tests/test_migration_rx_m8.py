@@ -27,6 +27,8 @@ UP, DOWN = MIG / "141_rx_registers.sql", MIG / "rollback" / "141_rollback_rx_reg
 
 def unwind_141(cur) -> None:
     """Inside an open transaction: purge every clinic with register entries and run the 141 rollback."""
+    from tests.test_migration_rx_m9 import unwind_142
+    unwind_142(cur)  # newest first: 142's purge v9 names 141 tables and its rows point at items / stores / sales
     cur.execute("SELECT to_regclass('public.rx_register_entries') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

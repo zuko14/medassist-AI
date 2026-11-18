@@ -594,6 +594,19 @@ CREATE TABLE rx_alerts (id, clinic_id, store_id, item_id NULL, batch_id NULL,
 dose parsed from `dosage` matching `^\d+(\.5)?$`; any other frequency/dosage → no plan is created (no guessing).
 Plans are never created for `schedule IN ('H1','X','narcotic','psychotropic')` or `is_chronic = false`.
 
+As built (142): the closed map is exactly `OD, BD, TDS, QID, HS` (`QD`, `TID`, `BID` and every other spelling make no
+plan); a plan also needs a registered patient on the sale and an OPD-prescription line (an OTC line has no dose to
+read). `covered_until = sale_day + floor(units / units_per_day)`, `remind_on = max(covered_until − refill_lead_days,
+sale_day)`. Extra columns: plans `last_sent_at`, `updated_at`, CHECK `remind_on <= covered_until`, `send_failures ≤ 3`;
+requests `verified_by/at`, `packed_by/at`, `updated_at`, CHECK reason ⇔ rejected, CHECK packed/completed ⇒ `sale_id`,
+and `uq_rx_refill_requests_open` (one open request per plan). `rx_alerts.kind` adds `stat_indent`; the dedupe index is
+on `COALESCE`d store / item / batch and is partial (`WHERE kind <> 'stat_indent'`, every STAT indent alerts).
+`rx_item_metrics` exists (A7 job lands with RX-75). Functions: `rx_ledger_check(clinic)` (balance vs Σ ledger per
+store × batch), `rx_alerts_scan(clinic, today, near_days)`, `rx_expiry_return_plan(clinic, store, today)`. DPDP
+erasure (RX-68 part 2): trigger `trg_rx_patient_erased` (AFTER UPDATE OF name ON patients, only when the name becomes
+`[REDACTED]`) deletes that patient's refill requests and plans, so every erasure path removes them; registers stay.
+Purge v9 deletes refills, alerts and metrics first.
+
 ## 10. Helpers
 As built in 134: `rx_purging`, `rx_raise`, `rx_guard_store`, `rx_update_settings`, `rx_purge_clinic`. Every other
 helper below lands in the migration of its first user (`rx_in_tx` / `rx_ist_date` 136, `rx_normalize` 135,
