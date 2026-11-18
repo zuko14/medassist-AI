@@ -2,7 +2,7 @@
 purchase (137, RX-23…26, RX-71), counter sales (138, RX-29…35, RX-69/70/72/73/77/81/82), inpatient pharmacy (139, RX-38…40),
 transfers / par levels / stock audits (140, RX-42…46, RX-78), statutory registers / batch recall / narcotic empties
 (141, RX-49, RX-50, RX-74, RX-79), refills / alerts / expiry-return planner (142, RX-56…RX-59, RX-76), Ketu stock answer / dashboard / lost-sale list
-(P9, RX-61, RX-62, RX-80).
+(P9, RX-61, RX-62, RX-80), GSTR-1 pharmacy section / CSV reports / ABC-FSN reorder analytics (P10, RX-52, RX-53, RX-75).
 Design: docs/pharmacy-os/API.md §0–§10, SECURITY.md §2–§3.
 
 Every route: permission -> enforce_clinic_access -> rx_access(clinic) ->
@@ -19,7 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.database import sb, scoped_query
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
 from app.services import (rx, rx_alerts, rx_audit, rx_catalogue, rx_dashboard, rx_gs1, rx_ipd, rx_pos, rx_pos_docs,
-                          rx_purchase, rx_refills, rx_registers, rx_stock, rx_transfers)
+                          rx_metrics, rx_purchase, rx_refills, rx_registers, rx_reports, rx_stock,
+                          rx_transfers)
 from app.services.rx_catalogue import BarcodeIn, GenericIn, ItemIn, ItemPatch, ManufacturerIn
 from app.services.rx_purchase import CreditIn, GrnIn, GrnPatch, POIn, POPatch, ReturnIn, SupplierIn, SupplierPatch
 from app.services.permissions import allowed_store_ids, holds_rx_permission, resolve_owned_branch
@@ -52,6 +53,8 @@ class SettingsPatch(_In):
     return_days: Optional[int] = None
     audit_approval_paise: Optional[int] = None
     pharmacist_reg_no: Optional[str] = None
+    safety_days: Optional[int] = None
+    review_days: Optional[int] = None
 
 
 class StoreIn(_In):
@@ -1636,3 +1639,81 @@ async def reveal_lost_sale_phone(prescription_id: uuid.UUID, request: Request, c
     out = await rx_dashboard.reveal_phone(scope, str(prescription_id))
     await _audit(user, request, "rx_lost_sale_phone_reveal", "opd_prescription", str(prescription_id), {})
     return out
+
+
+# ── P10: GSTR-1 pharmacy section (RX-52), CSV reports (RX-53), ABC / FSN / reorder analytics (RX-75) ──
+
+REPORTS = ("RX_REPORTS", "RX_ADMIN")
+
+
+@router.get("/reports/gstr1")
+async def pharmacy_gstr1(request: Request, month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2017, le=2100),
+                         clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    """The pharmacy's share of GSTR-1 for one IST month (the full return is /admin/billing/gstr1)."""
+    scope, _ = await _rx_scope(user, clinic_id, *REPORTS)
+    if _pinned_branch(user):                      # PHS- / PCN- series span every store and branch
+        raise HTTPException(status_code=403, detail="GSTR-1 covers every store: only a clinic-wide login can read it.")
+    from app.services.gst_billing import _ist_month_bounds
+    out = await rx_reports.pharmacy_gstr1(scope, *_ist_month_bounds(month, year))
+    await _audit(user, request, "rx_report_export", "rx_report", "gstr1",
+                 {"kind": "gstr1", "month": month, "year": year, "rows": len(out["b2b"]) + len(out["b2cs"])})
+    return {"period": f"{year:04d}-{month:02d}", **out}
+
+
+@router.get("/reports/{kind}.csv")
+async def report_csv(kind: Literal[rx_reports.KINDS], request: Request,  # type: ignore[valid-type]
+                     from_: Optional[date] = Query(None, alias="from"), to: Optional[date] = None,
+                     store_id: Optional[uuid.UUID] = None, clinic_id: str = "default",
+                     user: AdminUser = Depends(verify_credentials)):
+    """RX-53. Margin (cost) is RX_ADMIN only; everything else RX_REPORTS or RX_ADMIN. Every download is audited."""
+    scope, _ = await _rx_scope(user, clinic_id, *(("RX_ADMIN",) if kind == "margin" else REPORTS))
+    frm, to = rx_reports.date_range(from_, to)
+    headers, rows = await rx_reports.build(scope, kind, frm, to, await _store_ids(user, scope, store_id))
+    await _audit(user, request, "rx_report_export", "rx_report", kind,
+                 {"kind": kind, "from": frm.isoformat(), "to": to.isoformat(),
+                  "store_id": str(store_id) if store_id else None, "rows": len(rows)})
+    name = f"pharmacy-{kind}-{frm.isoformat()}-to-{to.isoformat()}.csv"
+    return Response(content=rx_reports.render_csv(headers, rows), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+
+
+@router.get("/metrics")
+async def get_metrics(store_id: Optional[uuid.UUID] = None, abc: Optional[Literal["A", "B", "C"]] = None,
+                      fsn: Optional[Literal["F", "S", "N"]] = None, dead_stock: Optional[bool] = None,
+                      clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    """A7: current vs suggested reorder levels, ADU, ABC / VED / FSN and dead stock (from the nightly materialisation)."""
+    scope, _ = await _rx_scope(user, clinic_id, "RX_REPORTS", "RX_READ", "RX_ADMIN")
+    return await rx_metrics.list_metrics(scope, await _store_ids(user, scope, store_id), abc, fsn, dead_stock)
+
+
+@router.post("/metrics/recompute")
+async def recompute_metrics(request: Request, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    """Recompute now (the nightly job does the same). Changes no item: suggestions are applied only through apply-reorder."""
+    scope, clinic = await _rx_scope(user, clinic_id, "RX_ADMIN")
+    out = await rx_metrics.compute_clinic(clinic)
+    await _audit(user, request, "rx_metrics_recompute", "rx_item_metrics", scope, out)
+    return out
+
+
+class ReorderLine(_In):
+    item_id: uuid.UUID
+    reorder_level_units: int = Field(..., ge=0, le=10_000_000)
+    reorder_qty_units: int = Field(..., ge=0, le=10_000_000)
+
+
+class ReorderApplyIn(_In):
+    items: list[ReorderLine] = Field(..., min_length=1, max_length=500)
+
+
+@router.post("/metrics/apply-reorder")
+async def apply_reorder(body: ReorderApplyIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    """Suggest-then-apply: writes only the levels the manager picked; each change lands in rx_item_changes."""
+    scope, _ = await _rx_scope(user, clinic_id, "RX_ADMIN", new_work=True)
+    ids = [str(ln.item_id) for ln in body.items]
+    if len(set(ids)) != len(ids):
+        raise HTTPException(status_code=422, detail="Each item may appear only once.")
+    out = await rx_metrics.apply_reorder(scope, [{**ln.model_dump(), "item_id": str(ln.item_id)} for ln in body.items],
+                                         *_actor(user))
+    await _audit(user, request, "rx_reorder_apply", "rx_item", None, {"items": len(out)})
+    return {"items": out}

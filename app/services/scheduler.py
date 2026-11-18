@@ -392,6 +392,13 @@ class SchedulerService:
             id="rx_refill_reminders",
             replace_existing=True,
         )
+        # P10 (RX-75): nightly ADU / ABC / FSN / reorder suggestions into rx_item_metrics (03:00 IST, CAS-locked).
+        self.scheduler.add_job(
+            self.rx_compute_metrics,
+            CronTrigger(hour=3, minute=0),
+            id="rx_compute_metrics",
+            replace_existing=True,
+        )
 
         # ── DPDP: Purge completed durable-queue rows (daily 3:30 AM) ──
         # inbound_messages had no purge at all and grows one row per patient
@@ -550,6 +557,17 @@ class SchedulerService:
                     await rx_alerts.run_scan()
                 except Exception as e:
                     logger.error(f"RX alert scan failed: {e}")
+
+    async def rx_compute_metrics(self):
+        from app.services import rx_metrics
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("rx_compute_metrics", lease_seconds=1800) as acquired:
+            if acquired:
+                try:
+                    await rx_metrics.run_nightly()
+                except Exception as e:
+                    logger.error(f"RX metrics job failed: {type(e).__name__}")
 
     async def rx_refill_reminders(self):
         from app.services import rx_refills

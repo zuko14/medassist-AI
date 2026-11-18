@@ -44,6 +44,8 @@ class RxSettings(BaseModel):
     return_days: int = Field(7, ge=0, le=90)
     audit_approval_paise: int = Field(500000, ge=0, le=100_000_000)
     pharmacist_reg_no: Optional[str] = Field(None, max_length=40)   # printed on statutory registers (141)
+    safety_days: int = Field(7, ge=0, le=60)                    # A7 reorder: lead time + safety_days of ADU
+    review_days: int = Field(15, ge=1, le=90)                   # A7 max: reorder + review_days of ADU
     version: int = Field(0, ge=0)
 
 

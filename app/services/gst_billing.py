@@ -176,9 +176,14 @@ async def export_gstr1_report(clinic_id: str, month: int, year: int, actor: Any 
 
     b2b: invoices to a buyer with a GSTIN, one row each; b2cs: the rest, by rate;
     nil_exempt: exempt (0%) supplies; credit_notes: CRN- issued in the month;
-    doc_summary: the numbered series with cancellations (Table 13)."""
+    doc_summary: the numbered series with cancellations (Table 13).
+
+    With Pharmacy OS on (RX-52), PHS- sales and PCN- credit notes are folded in and hsn_summary (Table 12) added;
+    with it off, not one rx_* table is read and the summary is exactly the OPD one."""
     if not 1 <= month <= 12 or not 2017 <= year <= 2100:
         raise HTTPException(status_code=422, detail="Pick a valid month and year.")
+    from app.services.tenant import get_clinic_by_id, rx_access
+    rx_on = rx_access(await get_clinic_by_id(clinic_id)) is not None
     start, end = _ist_month_bounds(month, year)
     cols = ("id, invoice_number, invoice_seq, issued_at, status, subtotal_paise, discount_paise, total_paise, "
             "total_tax_paise, credited_paise, clinic_gstin, patient_gstin, patient_snapshot")
@@ -241,7 +246,7 @@ async def export_gstr1_report(clinic_id: str, month: int, year: int, actor: Any 
                 "total": len(numbers), "cancelled": cancelled}
 
     gstin = next((i["clinic_gstin"] for i in invoices if i.get("clinic_gstin")), None)
-    return {
+    report = {
         "period": f"{year:04d}-{month:02d}",
         "clinic_gstin": gstin,
         "b2b": b2b,
@@ -262,3 +267,7 @@ async def export_gstr1_report(clinic_id: str, month: int, year: int, actor: Any 
             "credit_tax_paise": sum(c["cgst_paise"] + c["sgst_paise"] for c in credit_notes),
         },
     }
+    if not rx_on:
+        return report
+    from app.services.rx_reports import merge_gstr1, pharmacy_gstr1
+    return merge_gstr1(report, await pharmacy_gstr1(clinic_id, start, end))

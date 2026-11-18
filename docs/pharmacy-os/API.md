@@ -251,7 +251,10 @@ P7 notes (as built, migration 141 — 6 routes, route pin 101):
 | GET | `/admin/rx/alerts?kind&store_id&ack=false` | RX_READ | |
 | POST | `/admin/rx/alerts/{id}/ack` | RX_READ | |
 | GET | `/admin/rx/dashboard?store_id&date` | RX_READ | sales today, margin (RX_ADMIN only), pending indents, near-expiry value, low-stock count, refill requests |
-| GET | `/admin/rx/reports/{kind}.csv` | RX_ADMIN | kind ∈ sales_register, purchase_register, gst_summary, hsn_summary, stock_valuation, movement, expiry, margin |
+| GET | `/admin/rx/reports/{kind}.csv?from&to&store_id` | RX_REPORTS or RX_ADMIN (margin: RX_ADMIN only) | kind ∈ sales_register, purchase_register, gst_summary, hsn_summary, stock_valuation, movement, expiry, day_book, margin (P10) |
+| GET | `/admin/rx/reports/gstr1?month&year` | RX_REPORTS or RX_ADMIN | pharmacy section of GSTR-1 (P10) |
+| GET | `/admin/rx/metrics?store_id&abc&fsn&dead_stock` | RX_REPORTS, RX_READ or RX_ADMIN | A7 analytics (P10) |
+| POST | `/admin/rx/metrics/recompute`, `/admin/rx/metrics/apply-reorder` | RX_ADMIN | suggest-then-apply (P10) |
 | GET | `/admin/rx/expiry/return-plan?store_id` | RX_READ / RX_PURCHASE | A8 suggestion grouped by GRN supplier; drafts go through `POST /supplier-returns` |
 
 P8 notes (as built, migration 142 — 9 routes, route pin 110; dashboard and reports remain P9 / P10):
@@ -275,6 +278,35 @@ P8 notes (as built, migration 142 — 9 routes, route pin 110; dashboard and rep
   `refill_enabled`, the clinic's own WhatsApp credentials, `accepts_engagement`, template `rx_refill_due_v1` with
   `rx_refill:<plan>` / `rx_refill_off:<plan>`; three failed sends → `expired`). A STAT indent raises an alert and a
   notification at once. The A8 monthly drafting job is not scheduled: the planner is on demand.
+
+P10 notes (as built, no migration — 5 routes, route pin 119):
+- **GSTR-1 (RX-52).** `gst_billing.export_gstr1_report` (`/admin/billing/gstr1`, unchanged route) checks
+  `rx_access(clinic)` before any query. Off → the OPD dictionary exactly as before and no `rx_*` read. On → completed
+  `rx_sales` by `completed_at` in the IST month (void ones only count in the series): `b2b` (buyer GSTIN, PHS- number,
+  per-rate rows), `b2cs` added per rate to OPD's, `nil_exempt_paise` += 0 % lines, `credit_notes` += PCN- (taxable =
+  amount − tax, CGST = tax // 2), `hsn_summary` (Table 12: `hsn_code, tax_rate_bps, total_qty_units,
+  total_value_paise, taxable, cgst, sgst`; pharmacy lines only), `doc_summary.pharmacy_sales` /
+  `pharmacy_credit_notes` (PCN- has no cancellation), totals include pharmacy value / tax / credits.
+  `GET /reports/gstr1?month&year` (RX_REPORTS / RX_ADMIN, clinic-wide logins) returns only the pharmacy section; no
+  `gstr1_pharmacy.csv` kind was added. Patient returns refunded in cash / UPI / card issue no PCN- (P4 design), so they
+  are not GSTR-1 credit notes — carried to P11.
+- **CSV reports (RX-53).** `GET /reports/{kind}.csv?from&to&store_id` — dates IST inclusive, default this month,
+  ≤ 366 days (422 otherwise), unknown kind 422, store outside the login's scope 404. Money in rupees (2 decimals),
+  every cell through `rx_reports._csv_safe` (text starting `= + - @ TAB CR` gets a leading `'`; numbers stay numbers),
+  UTF-8 BOM. `stock_valuation` and `expiry` are as of now. No report selects a phone column. *audit:
+  rx_report_export* `{kind, from, to, store_id, rows}` on every download (and on the gstr1 read).
+- **Metrics (RX-75, A7).** `rx_metrics.compute_clinic` replaces the clinic's `rx_item_metrics` rows: out-movements
+  `sale_out`, `ipd_dispense_out`, `ward_issue_out` over the last 90 IST days → `adu_x1000 = round(units × 1000 / 90)`;
+  lead time from the supplier on the item's most recent posted GRN (default 3) + `rx_settings.safety_days` (7);
+  `review_days` (15); ABC per store by 90-day value at the movement's landed cost (A while the share before the item
+  is < 70 %, B < 90 %, else C; no consumption → C); FSN F > 1000, S > 0, N. Dead stock (on hand, no out-movement in
+  180 IST days) is computed when `GET /metrics` is read, with its cost value. Nightly `rx_compute_metrics` 03:00 IST
+  (`distributed_job_lock`, OFF clinics skipped). `POST /metrics/recompute` (RX_ADMIN) never touches `rx_items`;
+  `POST /metrics/apply-reorder {items: [{item_id, reorder_level_units, reorder_qty_units}]}` (RX_ADMIN, new work,
+  ≤ 500, duplicates 422) goes through `rx_update_item`, so each change lands in `rx_item_changes` with the reason
+  "A7 reorder suggestion applied". *audit: rx_metrics_recompute, rx_reorder_apply*.
+- UI: Report exporter + ABC / FSN card inside the Pharmacy Dashboard (`<!-- RX:reports -->`, prefix `rxa-`); Margin
+  is listed only for RX_ADMIN, Recompute / Apply only for RX_ADMIN.
 
 ## 10. Kriya Ketu read endpoints (P9)
 Ketu reuses the routes above in-process with the speaker's session. One extra read:

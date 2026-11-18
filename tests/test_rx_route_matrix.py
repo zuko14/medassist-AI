@@ -78,6 +78,9 @@ RX_ROUTES = {
     # P9 Ketu stock answer, dashboard, lost-sale call list (no migration)
     ("GET", "/admin/rx/stock/answer"), ("GET", "/admin/rx/dashboard"), ("GET", "/admin/rx/lost-sales"),
     ("POST", "/admin/rx/lost-sales/{prescription_id}/reveal-phone"),
+    # P10 GSTR-1 pharmacy section, CSV reports, ABC / FSN / reorder analytics (no migration)
+    ("GET", "/admin/rx/reports/gstr1"), ("GET", "/admin/rx/reports/{kind}.csv"), ("GET", "/admin/rx/metrics"),
+    ("POST", "/admin/rx/metrics/recompute"), ("POST", "/admin/rx/metrics/apply-reorder"),
 }
 
 

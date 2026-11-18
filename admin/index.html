@@ -3784,6 +3784,14 @@
         @media (max-width: 760px) { .rxd-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rxd-controls .field { flex: 1; min-width: calc(50% - 6px); }
             #pg-rxdash td[data-label]::before { content: attr(data-label) " "; color: var(--text3); font-size: 0.72rem; } }
         /* RX:dashboard:END */
+        /* RX:reports:START — Reports & Analytics inside the Pharmacy Dashboard (P10; RX-53, RX-75) */
+        .rxa-card { margin-top: 14px; }
+        .rxa-card .rxd-controls { margin-top: 10px; }
+        .rxa-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+        .rxa-cls { display: inline-block; min-width: 1.6em; padding: 1px 6px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--border); text-align: center; font-weight: 600; font-size: 0.78rem; }
+        .rxa-up { color: var(--accent); font-weight: 600; }
+        @media (max-width: 760px) { .rxa-actions { margin-left: 0; width: 100%; } .rxa-actions .btn { flex: 1; } }
+        /* RX:reports:END */
     </style>
 </head>
 <body>
@@ -8250,6 +8258,33 @@
                 <div class="page-head" style="margin-bottom:6px"><div><h3 style="margin:0">Lost-sale &amp; pending-balance call list</h3><p class="rx-sub" style="margin:4px 0 0">Prescriptions signed on <span id="rxdLostDay">yesterday</span> that the pharmacy did not bill, and part-filled ones with medicines still to give. Call the patient yourself; nothing is sent automatically.</p></div></div>
                 <div id="rxdLost" aria-live="polite"></div>
             </div>
+            <!-- RX:reports:START — Reports & Analytics (P10; RX-53 CSV exports, RX-75 ABC / FSN / dead stock / reorder) -->
+            <div class="card rxa-card" data-rx="show RX_REPORTS RX_ADMIN" style="display:none">
+                <h3 style="margin:0">Report exporter</h3>
+                <p class="rx-sub" style="margin:4px 0 0">Registers, GST and stock reports as CSV for your accountant. Dates are IST; stock valuation and expiry are as of now. Every download is logged.</p>
+                <div class="rxd-controls">
+                    <div class="field"><label for="rxaKind">Report</label><select id="rxaKind"></select></div>
+                    <div class="field"><label for="rxaFrom">From</label><input type="date" id="rxaFrom"></div>
+                    <div class="field"><label for="rxaTo">To</label><input type="date" id="rxaTo"></div>
+                    <div class="field"><label for="rxaStore">Store</label><select id="rxaStore"><option value="">All my stores</option></select></div>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="rxrep.download(this)">Download CSV</button>
+                </div>
+            </div>
+            <div class="card rxa-card" data-rx="show RX_REPORTS RX_READ RX_ADMIN" style="display:none">
+                <div class="page-head" style="margin-bottom:0"><div><h3 style="margin:0">ABC / FSN, dead stock &amp; reorder suggestions</h3>
+                    <p class="rx-sub" style="margin:4px 0 0">From the last 90 days of sales, ward dispensing and ward issues (recomputed nightly at 03:00). Suggestions change nothing until a manager applies them. <span id="rxaComputed"></span></p></div></div>
+                <div class="rxd-controls">
+                    <div class="field"><label for="rxaFilter">Show</label><select id="rxaFilter" onchange="rxrep.loadMetrics()">
+                        <option value="">All items</option><option value="abc=A">A — top 70% of consumption value</option><option value="abc=B">B — next 20%</option><option value="abc=C">C — the rest</option>
+                        <option value="fsn=F">Fast moving (&gt; 1 unit/day)</option><option value="fsn=S">Slow moving</option><option value="fsn=N">Non-moving (90 days)</option><option value="dead_stock=true">Dead stock (180 days)</option></select></div>
+                    <div class="rxa-actions" data-rx="show RX_ADMIN" style="display:none">
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="rxrep.recompute(this)">Recompute now</button>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="rxrep.apply(this)">Apply selected</button>
+                    </div>
+                </div>
+                <div id="rxaMetrics" aria-live="polite" style="margin-top:10px"></div>
+            </div>
+            <!-- RX:reports:END -->
         </div>
         <!-- RX:dashboard:END -->
         <!-- DX:foundation:START — DX Setup page (docs/diagnostic-os/UI.md, page dxsetup) -->
@@ -13065,6 +13100,7 @@ const rxdash = {
             ...(d.gross_margin_paise != null ? [rxdash.tile('Gross margin', (d.gross_margin_paise < 0 ? '−' : '') + rxRs(Math.abs(d.gross_margin_paise)), d.gross_margin_bps != null ? `${(d.gross_margin_bps / 100).toFixed(1)}% of taxable value` : 'no sales yet', 'rxpos')] : []),
         ].join('');
         rxdash.loadLost();
+        rxrep.load();   /* RX:reports */
     },
     async loadLost() {
         const box = document.getElementById('rxdLost');
@@ -13093,6 +13129,92 @@ const rxdash = {
     },
 };
 /* RX:dashboard:END */
+/* RX:reports:START — Reports & Analytics (P10; RX-53, RX-75). Margin is offered only to RX_ADMIN (the server refuses it
+   to everyone else); Recompute / Apply are RX_ADMIN and only ever write the levels the manager ticks. */
+const rxrep = {
+    seq: 0, rows: [],
+    kinds: [['sales_register', 'Sales register'], ['purchase_register', 'Purchase register'], ['gst_summary', 'GST summary by slab'],
+        ['hsn_summary', 'HSN summary (GSTR-1 Table 12)'], ['stock_valuation', 'Stock valuation'], ['movement', 'Stock movements'],
+        ['expiry', 'Expiry (≤ 90 days)'], ['day_book', 'Day book'], ['margin', 'Margin (cost) — managers only']],
+    istDay(d) { return new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10); },
+    load() {
+        const kind = document.getElementById('rxaKind');
+        if (kind && !kind.options.length) {
+            kind.innerHTML = rxrep.kinds.filter(([k]) => k !== 'margin' || rxCan('RX_ADMIN')).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('');
+            const today = rxrep.istDay(new Date());
+            document.getElementById('rxaTo').value = today;
+            document.getElementById('rxaFrom').value = today.slice(0, 8) + '01';
+        }
+        const st = document.getElementById('rxaStore');
+        if (st && st.options.length < 2 && rxdash.stores) st.innerHTML = '<option value="">All my stores</option>' + rxdash.stores.map(s => `<option value="${esc(s.id)}">${esc(s.code)} · ${esc(s.name)}</option>`).join('');
+        if (rxCan('RX_REPORTS') || rxCan('RX_READ') || rxCan('RX_ADMIN')) rxrep.loadMetrics();
+    },
+    async download(btn) {
+        const kind = document.getElementById('rxaKind').value, p = new URLSearchParams();
+        const from = document.getElementById('rxaFrom').value, to = document.getElementById('rxaTo').value, store = document.getElementById('rxaStore').value;
+        if (from) p.set('from', from);
+        if (to) p.set('to', to);
+        if (store) p.set('store_id', store);
+        btn.disabled = true;
+        try {
+            const r = await apiRaw(`/admin/rx/reports/${encodeURIComponent(kind)}.csv?${p}`);
+            const url = URL.createObjectURL(await r.blob()), a = document.createElement('a');
+            a.href = url; a.download = `pharmacy-${kind}-${from || 'month'}-to-${to || 'today'}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+        } catch (e) { toast(e.message, true); }
+        btn.disabled = false;
+    },
+    async loadMetrics() {
+        const box = document.getElementById('rxaMetrics');
+        if (!box) return;
+        const seq = ++rxrep.seq, p = new URLSearchParams(document.getElementById('rxaFilter').value), store = document.getElementById('rxdStore').value;
+        if (store) p.set('store_id', store);
+        box.innerHTML = loading();
+        let d;
+        try { d = await api('/admin/rx/metrics?' + p); } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+        if (seq !== rxrep.seq) return;
+        rxrep.rows = d.rows;
+        document.getElementById('rxaComputed').textContent = d.computed_on ? `Last computed ${d.computed_on}.` : 'Not computed yet.';
+        const admin = rxCan('RX_ADMIN');
+        const head = [...(admin ? ['<span class="sr-only">Select</span>'] : []), 'Item', 'Store', 'ABC', 'FSN', 'VED', 'Use / day', 'On hand', 'Reorder level now → suggested', 'Suggested max', 'Dead stock'];
+        box.innerHTML = d.rows.length ? `${d.dead_stock_value_paise ? `<p class="rx-sub">Dead stock at cost: <b>${rxRs(d.dead_stock_value_paise)}</b></p>` : ''}<div class="tbl-wrap"><table class="rxi-orders"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${d.rows.map((x, i) => `<tr>
+            ${admin ? `<td data-label="Select"><input type="checkbox" class="rxa-pick" value="${i}" aria-label="Apply the suggestion for ${esc(x.brand_name)}"${x.suggested_reorder_units === x.current_reorder_level_units ? ' disabled' : ''}></td>` : ''}
+            <td data-label="Item"><b>${esc(x.brand_name || '—')}</b><br><small class="rx-sub">${esc(x.item_code || '')}</small></td>
+            <td data-label="Store">${esc(x.store_name || '—')}</td>
+            <td data-label="ABC"><span class="rxa-cls">${esc(x.abc || '—')}</span></td>
+            <td data-label="FSN"><span class="rxa-cls">${esc(x.fsn || '—')}</span></td>
+            <td data-label="VED">${esc(x.ved || '—')}</td>
+            <td data-label="Use / day">${(x.adu_x1000 / 1000).toFixed(2)}</td>
+            <td data-label="On hand">${esc(x.on_hand_units)}</td>
+            <td data-label="Reorder level">${esc(x.current_reorder_level_units)} → <span class="${x.suggested_reorder_units !== x.current_reorder_level_units ? 'rxa-up' : ''}">${esc(x.suggested_reorder_units)}</span></td>
+            <td data-label="Suggested max">${esc(x.suggested_max_units)}</td>
+            <td data-label="Dead stock">${x.dead_stock ? `<span class="rx-badge e-expired">${rxRs(x.dead_stock_value_paise)}</span>` : '—'}</td></tr>`).join('')}</tbody></table></div>`
+            : `<p class="muted">${d.computed_on ? 'No items match this filter.' : 'No figures yet: they are computed nightly, or a manager can press Recompute now.'}</p>`;
+    },
+    async recompute(btn) {
+        btn.disabled = true;
+        try { const r = await apiPost('/admin/rx/metrics/recompute', {}); toast(`Recomputed ${r.rows} item × store rows.`); await rxrep.loadMetrics(); }
+        catch (e) { toast(e.message, true); }
+        btn.disabled = false;
+    },
+    async apply(btn) {
+        const picked = [...document.querySelectorAll('.rxa-pick:checked')].map(cb => rxrep.rows[Number(cb.value)]);
+        if (!picked.length) { toast('Tick the items whose suggested levels you want to apply.', true); return; }
+        const items = [], seen = new Set();
+        for (const x of picked) {            // reorder levels are per item: one store's suggestion per item
+            if (seen.has(x.item_id)) continue;
+            seen.add(x.item_id);
+            items.push({ item_id: x.item_id, reorder_level_units: x.suggested_reorder_units, reorder_qty_units: Math.max(x.suggested_reorder_qty_units, 0) });
+        }
+        if (!confirm(`Set the reorder level of ${items.length} item${items.length === 1 ? '' : 's'} to the suggested value? Each change is logged on the item.`)) return;
+        btn.disabled = true;
+        try { const r = await apiPost('/admin/rx/metrics/apply-reorder', { items }); toast(`Updated ${r.items.length} item${r.items.length === 1 ? '' : 's'}.`); await rxrep.loadMetrics(); }
+        catch (e) { toast(e.message, true); }
+        btn.disabled = false;
+    },
+};
+/* RX:reports:END */
 
 /* DX:foundation:START — Diagnostic OS (migration 125). Mirrors app.services.permissions
    holds_dx_permission; the server re-checks every call, hiding here is convenience only. */
