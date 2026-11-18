@@ -37,6 +37,17 @@ HOW_TO = ("how do i", "how do we", "how to", "how can i", "how should i", "ela",
 CLINICAL = ("diagnose", "diagnosis", "prescribe", "prescription for", "which tablet", "which medicine",
             "what medicine", "dosage", "dose of", "boy or girl", "ladka ya ladki", "ladka hai ya ladki",
             "sex of the baby", "gender of the baby")
+# Pharmacy (KRIYA-KETU §1, ADR-RX-06): substitutes, doses and interactions are the treating doctor's call. Ketu answers
+# these with one fixed sentence, before any routing; the question never reaches an action or the LLM fallback.
+MEDICINE_ADVICE = ("give instead", "use instead", "instead of", "what can i give", "what can we give", "can i give",
+                   "can we give", "what dose", "which dose", "how much dose", "dose for", "safe with", "safe to give",
+                   "safe in pregnancy", "safe for", "interaction with", "interacts with", "is it safe",
+                   "kya de sakte", "kya de sakta", "badle mein", "ke badle", "kitni dose", "dose kitni",
+                   "ఏ మందు ఇవ్వాలి", "బదులు", "ఎంత డోస్", "के बदले", "क्या दे सकते", "कितनी खुराक")
+# A staff question about a named medicine's STOCK, expiry or bill is pharmacy work, not a request for medical advice:
+# the patient firewall (which blocks any drug name) is skipped for exactly these, never for CLINICAL / MEDICINE_ADVICE.
+PHARMACY_ASK = ("in stock", "stock hai", "stock mein", "stock lo", "stock undha", "available in pharmacy",
+                "expiry of", "ki expiry", "ka expiry", "expiry date of", "batch expiry", "स्टॉक", "స్టాక్")
 OPEN_VERBS = ("open", "go to", "goto", "take me to", "navigate to", "kholo", "kholiye", "khol", "teruvu",
               "teravandi", "le chalo", "खोलो", "खोलिए", "ओपन", "తెరువు", "తెరవండి", "ఓపెన్")
 # Words that may surround a page name in a pure navigation request; anything else means "not just nav".
@@ -692,7 +703,12 @@ def route(text: str, *, visible_pages: Optional[list] = None, ui_page: Optional[
     t = _norm(text)
     if not t:
         return Route("none")
-    if screen_message(text)[0] or is_sex_determination_request(text) or has_any(t, CLINICAL):
+    if is_sex_determination_request(text) or has_any(t, CLINICAL):
+        return Route("rejected", error_code="clinical")
+    if has_any(t, MEDICINE_ADVICE):       # after the clinical words, whose wording "dose of …" questions keep
+        return Route("rejected", error_code="medicine_advice")
+    pharmacy_ask = has_any(t, PHARMACY_ASK) or ("bill" in t and "prescription" in t)
+    if not pharmacy_ask and screen_message(text)[0]:
         return Route("rejected", error_code="clinical")
     if _negated(t, text):
         return Route("rejected", error_code="negated")

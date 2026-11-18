@@ -16,6 +16,7 @@ from typing import Optional, Protocol
 from .intents import WORKFLOW_OF
 from .nlu_rules import SUPPORTED_LANGS, NLUResult, is_question, looks_english, script_language
 from .policy import is_noise
+from .responses import speak_phone
 from .scope import FULL, route as scope_route
 
 DIALOG_VERSION = "dialog-2026.11.04"
@@ -893,6 +894,25 @@ class DialogEngine:
             out.says.append(Say("refund_check_callback"))
             await self.tools.create_callback("refund_status")
         task["outcome"] = "callback_requested"
+        return True
+
+    async def _wf_pharmacy_refill(self, state, out, nlu, text) -> bool:
+        """'I need my medicines again': a refill request on the caller's own active refill plan (KRIYA-KETU §3).
+        No plan, the pharmacy is off, or the lookup failed: the pharmacy's number, never a stock figure."""
+        task = state["task"]
+        ask = getattr(self.tools, "rx_refill_request", None)
+        try:
+            res = await ask() if ask else None
+        except Exception:
+            res = None
+        if res and res.get("status") in ("requested", "already_requested"):
+            out.says.append(Say("rx_refill_received"))
+            task["outcome"] = "refill_requested"
+            return True
+        phone = (res or {}).get("pharmacy_phone")
+        out.says.append(Say("rx_refill_call_pharmacy", {"pharmacy_phone": speak_phone(phone)}) if phone
+                        else Say("rx_refill_visit_counter"))
+        task["outcome"] = "routed_to_pharmacy"
         return True
 
     async def _wf_report(self, state, out, nlu, text) -> bool:

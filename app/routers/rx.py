@@ -1,8 +1,9 @@
 """Kriya Pharmacy OS API — foundation (134, RX-05), drug master (135, RX-13…15), stock (136, RX-18…20),
 purchase (137, RX-23…26, RX-71), counter sales (138, RX-29…35, RX-69/70/72/73/77/81/82), inpatient pharmacy (139, RX-38…40),
 transfers / par levels / stock audits (140, RX-42…46, RX-78), statutory registers / batch recall / narcotic empties
-(141, RX-49, RX-50, RX-74, RX-79), refills / alerts / expiry-return planner (142, RX-56…RX-59, RX-76).
-Design: docs/pharmacy-os/API.md §0–§9, SECURITY.md §2–§3.
+(141, RX-49, RX-50, RX-74, RX-79), refills / alerts / expiry-return planner (142, RX-56…RX-59, RX-76), Ketu stock answer / dashboard / lost-sale list
+(P9, RX-61, RX-62, RX-80).
+Design: docs/pharmacy-os/API.md §0–§10, SECURITY.md §2–§3.
 
 Every route: permission -> enforce_clinic_access -> rx_access(clinic) ->
 (new work) wind-down rule -> store / branch scope -> service. Zero-LLM.
@@ -17,8 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.database import sb, scoped_query
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
-from app.services import (rx, rx_alerts, rx_audit, rx_catalogue, rx_gs1, rx_ipd, rx_pos, rx_pos_docs, rx_purchase,
-                          rx_refills, rx_registers, rx_stock, rx_transfers)
+from app.services import (rx, rx_alerts, rx_audit, rx_catalogue, rx_dashboard, rx_gs1, rx_ipd, rx_pos, rx_pos_docs,
+                          rx_purchase, rx_refills, rx_registers, rx_stock, rx_transfers)
 from app.services.rx_catalogue import BarcodeIn, GenericIn, ItemIn, ItemPatch, ManufacturerIn
 from app.services.rx_purchase import CreditIn, GrnIn, GrnPatch, POIn, POPatch, ReturnIn, SupplierIn, SupplierPatch
 from app.services.permissions import allowed_store_ids, holds_rx_permission, resolve_owned_branch
@@ -1587,3 +1588,51 @@ async def expiry_return_plan(store_id: uuid.UUID, clinic_id: str = "default",
     scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_READ)
     store = _store_for(user, await rx.get_store(scope, str(store_id)))
     return {"store": store, "suppliers": await rx_purchase.return_plan(scope, str(store_id))}
+
+
+# ── P9: Ketu stock answer (RX-61), dashboard (RX-62), lost-sale call list (A12, RX-80) ──
+
+@router.get("/stock/answer")
+async def stock_answer(q: str = Query("", max_length=120), clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    """KRIYA-KETU §2.1. A nurse without RX_READ sees exact counts for ward stores only, plus available_at_pharmacy."""
+    scope, _ = await _rx_scope(user, clinic_id, "RX_READ", "RX_ADMIN", "IPD_NURSING")
+    nurse = _ward_only(user)
+    stores = [s for s in await _visible_stores(user, scope) if s.get("is_active") is not False]
+    if nurse:                       # the pharmacy's stores stay in the list only to answer "available: yes / no"
+        all_stores = [s for s in await rx.list_stores(scope) if s.get("is_active") is not False]
+        ids = {str(s["id"]) for s in stores if s["store_type"] in rx_dashboard.WARD_STORES}
+        stores = [s for s in all_stores if str(s["id"]) in ids or s["store_type"] not in rx_dashboard.WARD_STORES]
+    if not q.strip():
+        return {"status": "not_found", "query": "", "resolved_by": None, "matches": []}
+    return await rx_dashboard.stock_answer(scope, q.strip(), stores, nurse)
+
+
+@router.get("/dashboard")
+async def pharmacy_dashboard(store_id: Optional[uuid.UUID] = None, date_: Optional[date] = Query(None, alias="date"),
+                             clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, "RX_READ", "RX_ADMIN")
+    from app.utils.helpers import today_ist
+    return await rx_dashboard.dashboard(scope, await _store_ids(user, scope, store_id), date_ or today_ist(),
+                                        holds_rx_permission(user, "RX_ADMIN"), rx.get_rx_settings(clinic))
+
+
+@router.get("/lost-sales")
+async def lost_sales(date_: Optional[date] = Query(None, alias="date"), clinic_id: str = "default",
+                     user: AdminUser = Depends(verify_credentials)):
+    """A12: yesterday's (or `date`'s) signed prescriptions the pharmacy did not bill, and part-filled ones."""
+    scope, _ = await _rx_scope(user, clinic_id, "RX_READ", "RX_DISPENSE", "RX_ADMIN")
+    from datetime import timedelta
+    from app.utils.helpers import today_ist
+    day = date_ or (today_ist() - timedelta(days=1))
+    return {"date": day.isoformat(), "rows": await rx_dashboard.lost_sales(scope, day)}
+
+
+@router.post("/lost-sales/{prescription_id}/reveal-phone")
+async def reveal_lost_sale_phone(prescription_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                                 user: AdminUser = Depends(verify_credentials)):
+    """The full number for a manual call. Audited; nothing is ever sent automatically from the call list."""
+    scope, _ = await _rx_scope(user, clinic_id, "RX_DISPENSE", "RX_ADMIN")
+    out = await rx_dashboard.reveal_phone(scope, str(prescription_id))
+    await _audit(user, request, "rx_lost_sale_phone_reveal", "opd_prescription", str(prescription_id), {})
+    return out

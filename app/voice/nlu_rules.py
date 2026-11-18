@@ -83,6 +83,8 @@ W = {
               "ఎంతసేపు వెయిట్", "ఎంతసేపు ఆగాలి", "कितना इंतज़ार", "कितना इंतजार", "kitna wait"),
     "PAYMENT": ("payment", "paid", "pay", "link", "చెల్లింపు", "పేమెంట్", "पेमेंट", "भुगतान"),
     "REFUND": ("refund", "రీఫండ్", "रिफंड", "paisa wapas", "पैसा वापस"),
+    "REFILL": ("refill", "repeat medicine", "repeat my medicine", "repeat medicines", "medicines again",
+               "dawa dobara", "dawai dobara", "दवा दोबारा", "दवाई दोबारा", "mandulu malli", "మందులు మళ్ళీ", "రీఫిల్"),
     "HUMAN": ("human", "receptionist", "reception", "person", "staff", "operator", "someone", "manishi",
               "మనిషి", "రిసెప్షన్", "इंसान", "किसी से बात", "रिसेप्शन"),
     "CALLBACK": ("call back", "callback", "call me back", "call me later", "తర్వాత కాల్", "baad mein call", "बाद में कॉल",
@@ -402,6 +404,8 @@ def understand(text: str, ctx: NluContext, expect: Optional[str] = None) -> NLUR
         hit("REPORT_DELIVERY" if has_any(t, W["SEND"]) else "REPORT_STATUS", "REPORT")
     if has_lab and not has_report:
         hit("LAB_TEST_BOOKING" if has_any(t, W["BOOK"]) else "LAB_TEST_SEARCH", "LAB")
+    if has_any(t, W["REFILL"]):
+        hit("PHARMACY_REFILL", "REFILL")
     if has_any(t, W["REFUND"]):
         hit("REFUND_STATUS", "REFUND")
     elif has_any(t, W["PAYMENT"]):

@@ -17,7 +17,7 @@ ALL_INTENTS = (
     "PAYMENT_STATUS", "PAYMENT_LINK", "PAYMENT_FAILED", "REFUND_STATUS", "LAB_INFORMATION",
     "LAB_TEST_SEARCH", "LAB_TEST_BOOKING", "HOME_SAMPLE_COLLECTION", "SAMPLE_STATUS", "REPORT_STATUS",
     "REPORT_READY", "REPORT_DELIVERY", "REPORT_REDELIVERY", "DOWNLOAD_REPORT", "PRESCRIPTION_STATUS",
-    "PRESCRIPTION_DELIVERY", "PHARMACY_INFORMATION", "FOLLOW_UP_REMINDER", "HEALTH_CAMP",
+    "PRESCRIPTION_DELIVERY", "PHARMACY_INFORMATION", "PHARMACY_REFILL", "FOLLOW_UP_REMINDER", "HEALTH_CAMP",
     "CORPORATE_SCREENING", "DOCTOR_LEAVE", "SERVICE_AVAILABILITY", "COMPLAINT", "FEEDBACK",
     "CALLBACK_REQUEST", "HUMAN_AGENT_REQUEST", "EMERGENCY", "CLINICAL_QUERY", "UNKNOWN", "MULTI_INTENT",
     # A question about the hospital's services, treatments, doctors, facilities or policies:
@@ -47,6 +47,9 @@ WORKFLOW_OF = {
     "PAYMENT_LINK": "STATUS", "PAYMENT_FAILED": "STATUS", "SAMPLE_STATUS": "REPORT",
     # "Where is my refund?": read from the caller's own cancelled bookings (session 57), never a guess.
     "REFUND_STATUS": "REFUND",
+    # "I need my medicines again": a refill request on the caller's own active refill plan (Pharmacy OS, W10);
+    # without one, the caller is given the pharmacy's number. Stock is never spoken to a patient.
+    "PHARMACY_REFILL": "PHARMACY_REFILL",
     "HUMAN_AGENT_REQUEST": "HUMAN", "CALLBACK_REQUEST": "CALLBACK",
     "COMPLAINT": "CALLBACK", "FEEDBACK": "CALLBACK",
 }
@@ -57,7 +60,7 @@ HANDLED = frozenset(WORKFLOW_OF)
 RISK = {
     "BOOKING": "transactional", "LAB_BOOKING": "transactional", "CANCEL": "transactional",
     "RESCHEDULE": "transactional", "REPORT": "sensitive", "STATUS": "sensitive", "QUEUE": "sensitive",
-    "REFUND": "sensitive",
+    "REFUND": "sensitive", "PHARMACY_REFILL": "sensitive",
     "FEES": "informational", "LAB_PRICE": "informational", "INFO": "informational",
     "HUMAN": "routing", "CALLBACK": "routing",
 }

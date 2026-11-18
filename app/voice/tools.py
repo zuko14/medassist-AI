@@ -210,6 +210,15 @@ class KriyaTools:
         await self._trace("REFUND_LOOKUP", "ok", t0, {"found": len(rows)})
         return rows
 
+    async def rx_refill_request(self):
+        """PHARMACY_REFILL (KRIYA-KETU §3): a voice refill request on the caller's OWN active refill plan, in this
+        clinic, when its pharmacy is ACTIVE (app/services/rx_refills.voice_request). Never a stock figure."""
+        from app.services import rx_refills
+        t0 = time.monotonic()
+        out = await rx_refills.voice_request(self.ctx.clinic, self.ctx.caller_phone)
+        await self._trace("RX_REFILL", "fail" if out["status"] == "failed" else "ok", t0, {"result": out["status"]})
+        return out
+
     async def reports(self):
         t0 = time.monotonic()
         since = (today_ist() - timedelta(days=60)).isoformat()

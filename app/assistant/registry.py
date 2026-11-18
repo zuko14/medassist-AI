@@ -23,6 +23,7 @@ from app.services.permissions import (
     holds_order_permission,
     holds_services_permission,
     holds_ot_permission,
+    holds_rx_permission,
 )
 from app.services.tenant import (
     corporate_health_enabled,
@@ -32,6 +33,7 @@ from app.services.tenant import (
     home_collection_available,
     ipd_access,
     opd_enabled,
+    rx_access,
     specialty_enabled,
 )
 from app.voice.dates import today_ist
@@ -91,6 +93,7 @@ PAGES: dict[str, str] = {
     "rxaudit": "Stock Audit",      # Pharmacy OS physical stock audit (migration 140); page hand-off only
     "rxregisters": "Drug Registers",   # Pharmacy OS statutory H/H1/X/narcotic registers (migration 141); page hand-off only
     "rxrefills": "Refills & Alerts",   # Pharmacy OS refill requests, stock / integrity alerts, expiry returns (142); page hand-off only
+    "rxdash": "Pharmacy Dashboard",   # Pharmacy OS KPIs + lost-sale call list (P9); rx.today_summary reads it
     "dxinstruments": "Instruments & QC",   # Diagnostic OS analyser bridge and QC (migration 133); page hand-off only
     "insurance": "Insurance / TPA",
     "tariffs": "Service Catalogue",
@@ -153,6 +156,7 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
                 "variance report"),
     "rxregisters": ("drug registers", "schedule h1 register", "narcotic register", "schedule x register",
                     "drug inspector", "batch recall", "recall trace"),
+    "rxdash": ("pharmacy dashboard", "pharmacy kpis", "lost sales", "lost sale list", "pending balance call list"),
     "rxrefills": ("refill requests", "medicine refills", "refill reminders", "pharmacy alerts", "low stock alerts",
                   "expiry returns", "return to supplier planner"),
     "rxindents": ("ward indents", "ward indent", "medicine indent", "raise indent", "indent queue", "dispense to ward"),
@@ -1584,6 +1588,139 @@ DX_ACTIONS = (
 )
 
 
+# ── Pharmacy OS (P9, RX-60/61; docs/pharmacy-os/KRIYA-KETU.md §2) ─────────────────────────────────────────
+# The SAME /admin/rx routes the pages use, dispatched with the speaker's session: _rx_scope (permission inside the
+# handler), store scope, nurse ward scope and audit apply unchanged. Reads and hand-offs only: nothing that moves
+# stock, money or a register is ever executed by Ketu, and no stock / patient data reaches the LLM fallback.
+
+def _rx_on(clinic: dict) -> bool:  # _rx_scope(): module ACTIVE or WIND_DOWN
+    return bool(rx_access(clinic))
+
+
+def _rx(perm: str, *also: str) -> dict:
+    return dict(permission=perm, also=also, perm_source=_HANDLER, feature=_rx_on,
+                holds=lambda u: any(holds_rx_permission(u, p) for p in (perm, *also)))
+
+
+_RX_STOCK_NOISE = {"is", "are", "in", "stock", "available", "availability", "do", "we", "have", "any", "the", "of",
+                   "a", "an", "hai", "kya", "ha", "mein", "me", "lo", "undha", "unda", "unnaya", "please", "check",
+                   "how", "much", "many", "left", "pharmacy", "there", "still", "units", "strips", "tablets",
+                   "expiry", "expiries", "batch", "batches", "date", "dates", "ki", "ka", "ke", "what", "when",
+                   "స్టాక్", "స్టాక్‌లో", "ఉందా", "ఉన్నాయా", "స్టాకులో", "है", "क्या", "स्टॉक", "में", "हैं"}
+_RX_BILL_NO = re.compile(r"\bphs-(\d{4})-(\d{1,6})\b", re.I)
+
+
+def _rx_term(params: dict, text: str) -> dict:
+    """The medicine the sentence names, minus the question words ("Is Augmentin 625 in stock?" -> "augmentin 625")."""
+    if params.get("q"):
+        return params
+    words = [w for w in re.findall(r"[^\W_]+", (text or "").lower()) if w not in _RX_STOCK_NOISE]
+    term = " ".join(words)
+    return {**params, "q": term} if 1 <= len(term) <= 80 else params
+
+
+def _rx_bill(params: dict, text: str) -> dict:
+    m = _RX_BILL_NO.search(text or "")
+    return {**params, "q": f"PHS-{m.group(1)}-{int(m.group(2)):06d}"} if m else params
+
+
+def _rx_expiring(data) -> list:
+    b = data.get("buckets") if isinstance(data, dict) else None
+    return [r for k in ("expired", "le_30", "le_60", "le_90") for r in (b or {}).get(k) or [] if isinstance(r, dict)]
+
+
+_RX_INDENT_COLS = (("Indent", "indent_number", "text"), ("Priority", "priority", "label"), ("Ward", "ward", "text"),
+                   ("Bed", "bed", "text"), ("Patient", "patient_name", "text"), ("Status", "status", "label"),
+                   ("Raised", "raised_at", "time"))
+_RX_DASH = (("Sales today", "sales_today_paise", "paise"), ("Bills", "sales_count", "text"),
+            ("Returns", "returns_today_paise", "paise"), ("Pending ward indents", "pending_indents_count", "text"),
+            ("STAT indents", "stat_indents_count", "text"), ("Refill requests", "pending_refill_requests_count", "text"),
+            ("Items below reorder", "low_stock_count", "text"),
+            ("Expiring in 90 days (value)", "near_expiry_value_paise", "paise"),
+            ("Expired batches on shelf", "expired_on_hand_count", "text"), ("Open alerts", "unack_alerts_count", "text"),
+            ("Registers intact", "register_chain_status.ok", "yesno"), ("Gross margin", "gross_margin_paise", "paise"))
+
+RX_ACTIONS = (
+    _read("rx.stock_lookup", "Is a medicine in stock", "/admin/rx/stock/answer", "rxstock",
+          ("in stock", "stock hai", "stock mein", "stock lo", "stock undha", "available in pharmacy", "hai kya",
+           "స్టాక్ ఉందా", "ఉందా", "स्टॉक में", "है क्या"),
+          lambda d, p: present.rx_stock(d, p),
+          query=lambda p: {"q": p.get("q") or ""}, slots=(SlotSpec("q", "term", required=False),), derive=_rx_term,
+          unless=("expiry", "running low", "low stock", "refill", "indent", "bill"),
+          **_rx("RX_READ", "RX_ADMIN", "IPD_NURSING")),
+    _read("rx.batch_expiry", "Expiry of a medicine's batches", "/admin/rx/stock", "rxstock",
+          ("expiry of", "ki expiry", "ka expiry", "batch expiry", "expiry date of", "expiry dates of"),
+          lambda d, p: present.table(f'Stock and nearest expiry: "{p.get("q")}"' if p.get("q") else "Stock and nearest expiry",
+                                     "rxstock", (("Medicine", "item.brand_name", "text"), ("Units", "qty_units", "text"),
+                                                 ("Nearest expiry", "nearest_expiry", "date")), _rows(d, "stock")),
+          query=lambda p: {"q": p.get("q")} if p.get("q") else {},
+          slots=(SlotSpec("q", "term", required=False),), derive=_rx_term, **_rx("RX_READ", "RX_ADMIN")),
+    _read("rx.low_stock", "Medicines below reorder level", "/admin/rx/stock", "rxstock",
+          ("running low", "low stock", "below reorder", "reorder list", "khatam ho raha", "khatam hone wali",
+           "taggipothunna", "అయిపోతున్న", "खत्म हो रहा"),
+          lambda d, p: present.table("Below reorder level", "rxstock", (
+              ("Medicine", "item.brand_name", "text"), ("On hand", "qty_units", "text"),
+              ("Reorder at", "item.reorder_level_units", "text")), _rows(d, "stock")),
+          query=lambda p: {"below_reorder": True}, unless=("alert",), **_rx("RX_READ", "RX_ADMIN")),
+    _read("rx.near_expiry", "Medicines expiring within 90 days", "/admin/rx/expiry", "rxstock",
+          ("near expiry", "expiring soon", "expiry wali dawa", "expiry wali medicine", "expire hone wali",
+           "expiry daggara", "ఎక్స్‌పైరీ", "एक्सपायरी"),
+          lambda d, p: present.table("Expiring within 90 days", "rxstock", (
+              ("Medicine", "item.brand_name", "text"), ("Batch", "batch_no", "text"), ("Units", "qty_units", "text"),
+              ("Expiry", "expiry_date", "date"), ("Days left", "days_left", "text")), _rx_expiring(d)),
+          query=lambda p: {"days": 90}, unless=("expiry of", "ki expiry", "ka expiry"), **_rx("RX_READ", "RX_ADMIN")),
+    _read("rx.pending_indents", "Pending ward indents", "/admin/rx/ipd/indents", "rxindents",
+          ("pending ward indents", "pending indents", "stat indents", "indents pending", "ward indents pending",
+           "indents waiting", "indent pending", "indents enni pending", "kitne indent pending"),
+          lambda d, p: present.table("Ward indents waiting", "rxindents", _RX_INDENT_COLS, _rows(d, "indents")),
+          query=lambda p: {"status": "raised"}, **_rx("RX_DISPENSE", "RX_ADMIN")),
+    _read("rx.my_ward_indent_status", "Has the pharmacy sent my ward's medicines", "/admin/rx/ipd/indents", "rxindents",
+          ("has pharmacy sent", "pharmacy sent", "ki dawa aayi", "ki dawai aayi", "medicines sent", "mandulu vachaya",
+           "మందులు వచ్చాయా", "दवा आई"),
+          lambda d, p: present.table("Your ward's indents", "rxindents", _RX_INDENT_COLS, _rows(d, "indents")),
+          **_rx("IPD_NURSING", "RX_DISPENSE")),
+    _read("rx.refill_requests", "New refill requests", "/admin/rx/refills/requests", "rxrefills",
+          ("new refill requests", "refill requests today", "refills today", "refill ke request", "refill request kitne",
+           "refill requests enni", "pending refill requests"),
+          lambda d, p: present.table("Refill requests", "rxrefills", (
+              ("Patient", "patient.name", "text"), ("Medicine", "item.brand_name", "text"),
+              ("Asked", "created_at", "time"), ("Channel", "channel", "label")), _rows(d, "requests")),
+          query=lambda p: {"status": "new"}, **_rx("RX_DISPENSE", "RX_ADMIN")),
+    _read("rx.today_summary", "Today's pharmacy summary", "/admin/rx/dashboard", "rxdash",
+          ("pharmacy sales today", "pharmacy summary today", "pharmacy today", "today's pharmacy", "todays pharmacy",
+           "pharmacy collection", "medical store sales", "pharmacy ki sale", "pharmacy sales entha", "pharmacy sale kitni",
+           "ఫార్మసీ సేల్స్", "फार्मेसी बिक्री"),
+          lambda d, p: present.metrics("Pharmacy today", "rxdash", d, _RX_DASH),
+          query=lambda p: {k: v for k, v in (("date", p.get("date")),) if v}, slots=_DATE,
+          **_rx("RX_READ", "RX_ADMIN")),
+    _read("rx.find_bill", "Find a pharmacy bill", "/admin/rx/sales", "rxpos",
+          ("find bill", "find the bill", r"re:\bphs \d{4} \d{1,6}\b", "find pharmacy bill", "bill number",
+           "bill vetuku", "bill dhundo"),
+          lambda d, p: present.table(f'Pharmacy bill {p.get("q")}' if p.get("q") else "Recent pharmacy bills", "rxpos", (
+              ("Bill", "sale_number", "text"), ("Status", "status", "label"), ("Amount", "net_paise", "paise"),
+              ("Completed", "completed_at", "time")), _rows(d, "sales")),
+          query=lambda p: {"q": p["q"]} if p.get("q") else {}, slots=(SlotSpec("q", "term", required=False),),
+          derive=_rx_bill, **_rx("RX_READ", "RX_DISPENSE", "RX_ADMIN")),
+    _h("rx.sell", "Bill a prescription at the pharmacy", "rxpos", "",
+       ("bill+prescription", "pharmacy+bill karo", "sell+medicines", "medicines+bill", "dawa+bill"),
+       "Open the Pharmacy POS, look up the patient's prescription and press Complete yourself.",
+       feature=_rx_on, unless=("find", "show", "status")),
+    _h("rx.dispense_indent", "Dispense a ward indent", "rxindents", "",
+       ("dispense+indent", "indent+dispense"),
+       "Open the indent in Ward Indents, check each line's batch and press Dispense yourself.", feature=_rx_on),
+    _h("rx.raise_indent", "Raise a ward indent", "rxindents", "",
+       ("raise+indent", "indent+raise", "new indent", "indent+bed"),
+       "Pick the patient in Ward Indents, choose the medicines from the doctor's orders and press Raise yourself.",
+       feature=_rx_on, unless=("pending", "status", "sent")),
+    _h("rx.receive_grn", "Inward a supplier invoice", "rxpurchase", "",
+       ("inward+invoice", "supplier+invoice", "receive+grn", "grn+entry", "inward+supplier"),
+       "Open Purchase & GRN, enter the supplier invoice lines and press Post yourself.", feature=_rx_on),
+    _h("rx.register_export", "Export a drug register", "rxregisters", "",
+       ("h1 register", "narcotic register", "schedule x register", "register+export", "drug register+for"),
+       "Open Drug Registers, pick the register and dates, then press Export PDF or Export CSV.", feature=_rx_on),
+)
+
+
 def _ot(perm: str) -> dict:
     return dict(permission=perm, holds=lambda u: holds_ot_permission(u, perm), feature=_ipd_on)
 
@@ -2122,6 +2259,7 @@ REGISTRY: dict[str, ActionSpec] = _build(
     *IPD_ACTIONS,
     *HOSPITAL_ACTIONS,
     *DX_ACTIONS,
+    *RX_ACTIONS,
     *OT_ACTIONS,
     *VOICE_ENTRY_3,
     *VOICE_ENTRY_4,

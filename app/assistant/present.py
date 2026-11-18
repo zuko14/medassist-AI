@@ -72,3 +72,56 @@ def metrics(title: str, page, data, fields: tuple) -> dict:
     card = {"type": "table", "title": title, "columns": ["Measure", "Value"], "rows": rows,
             "total": len(rows), "page": page}
     return {"message": title + ".", "navigate": None, "cards": [card]}
+
+
+def _units(store: dict, unit: str) -> str:
+    pl = store.get("packs_loose") or {}
+    packs, loose, total = pl.get("packs"), pl.get("loose"), store.get("qty_units")
+    if packs is None:
+        return f"{total} {unit}"
+    if not loose:
+        return f"{packs} strips ({total} {unit})" if packs else f"0 {unit}"
+    return f"{packs} strips + {loose} {unit} ({total} {unit})" if packs else f"{loose} {unit}"
+
+
+def rx_stock(data, params=None) -> dict:
+    """KRIYA-KETU §2.1, from GET /admin/rx/stock/answer. Same-generic items are listed only as information:
+    no text here ever says "use instead", "can be given" or anything about dosing."""
+    data = data if isinstance(data, dict) else {}
+    status, matches = data.get("status"), data.get("matches") or []
+    q = str(data.get("query") or "that")[:60]
+    if status == "not_found" or not matches:
+        return _note(f'No medicine matching "{q}" in the drug master.', "rxitems")
+    if status == "ambiguous":
+        names = [str(at(m, "item.brand_name")) for m in matches[:3] if at(m, "item.brand_name")]
+        card = {"type": "table", "title": "Did you mean…?", "columns": ["Medicine", "Code"],
+                "rows": [[fmt(at(m, "item.brand_name")), fmt(at(m, "item.item_code"))] for m in matches[:3]],
+                "total": len(names), "page": "rxstock"}
+        return {"message": "Did you mean " + " or ".join(names) + "? Ask again with the full name.",
+                "navigate": None, "cards": [card]}
+    m = matches[0]
+    item, gen = m.get("item") or {}, m.get("generic") or {}
+    unit = item.get("base_unit") or "units"
+    name = item.get("brand_name") or q
+    comp = " ".join(str(x) for x in (gen.get("name"), gen.get("strength"), gen.get("dosage_form")) if x)
+    stores = [s for s in m.get("stores") or [] if isinstance(s, dict)]
+    rows = [[fmt(s.get("store_name")), _units(s, unit), fmt(s.get("nearest_expiry"), "date")] for s in stores[:MAX_ROWS]]
+    if "available_at_pharmacy" in m:
+        rows.append(["Pharmacy", "Available" if m["available_at_pharmacy"] else "Not available", "—"])
+    subs = [s for s in m.get("substitutes_in_stock") or [] if isinstance(s, dict)]
+    same = ", ".join(f"{s.get('brand_name')}" + (f" ({s['qty_units']} {unit})" if s.get("qty_units") is not None else "")
+                     for s in subs[:5])
+    in_stock = status == "match"
+    if in_stock:
+        where = "; ".join(f"{s.get('store_name')}: {_units(s, unit)}" for s in stores if s.get("qty_units"))
+        message = f"{name}{f' ({comp})' if comp else ''} — " + (where or "available at the pharmacy") + "."
+    else:
+        message = f"{name} is out of stock" + (f" at {stores[0].get('store_name')} (0)" if len(stores) == 1 else "") + "."
+        if same:
+            message += f" Same composition in stock: {same}."
+    cards = [{"type": "table", "title": name + (f" · {comp}" if comp else ""), "columns": ["Store", "In stock", "Nearest expiry"],
+              "rows": rows or [["—", "0", "—"]], "total": len(rows), "page": "rxstock"}]
+    if same and in_stock:
+        cards.append({"type": "help", "text": f"Same composition in stock: {same}.", "page": None})
+    cards.append({"type": "help", "text": "To bill it, open the Pharmacy POS.", "page": "rxpos"})
+    return {"message": message, "navigate": None, "cards": cards}

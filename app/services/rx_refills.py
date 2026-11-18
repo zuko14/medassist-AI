@@ -29,6 +29,7 @@ def _upd(table: str, clinic_id: str, patch: dict):
     """A clinic-scoped UPDATE (scoped_query only builds SELECTs)."""
     return supabase.table(table).update(patch).eq("clinic_id", clinic_id)
 
+
 FREQ = {"OD": 1, "BD": 2, "TDS": 3, "QID": 4, "HS": 1}       # closed map: nothing else ever makes a plan
 DOSE = re.compile(r"^\d+(\.5)?$")
 NO_REFILL_SCHEDULES = ("H1", "X", "narcotic", "psychotropic")
@@ -393,3 +394,38 @@ async def mark_fulfilled(clinic_id: str, sale_id: str) -> None:
 
 async def open_count(clinic_id: str) -> int:
     return len(await _rows(scoped_query("rx_refill_requests", clinic_id, "id").in_("status", ["new", "verified"]).limit(1000)))
+
+
+# ── voice receptionist PHARMACY_REFILL (KRIYA-KETU §3, RX-61) ───────────────
+
+async def voice_request(clinic: dict, caller_phone: str) -> dict:
+    """A refill request (channel 'voice') on the caller's OWN active plan in this clinic, only while the pharmacy is
+    ACTIVE. {"status": requested | already_requested | no_plan | off | failed, "pharmacy_phone": ...}. Never stock."""
+    from app.services.tenant import get_clinic_contact, rx_access
+    cid = clinic["id"]
+    phone = (get_clinic_contact(clinic, "pharmacy_phone", "") or get_clinic_contact(clinic, "staff_phone", "")
+             or get_clinic_contact(clinic, "phone", "") or clinic.get("whatsapp_number") or None)
+    if rx_access(clinic) != "ACTIVE":
+        return {"status": "off", "pharmacy_phone": phone}
+    try:
+        pids = [r["id"] for r in await _rows(scoped_query("patients", cid, "id").eq("phone", caller_phone).limit(5))]
+        plans = await _rows(scoped_query("rx_refill_plans", cid, "id, patient_id, status").in_("patient_id", pids)
+                            .in_("status", list(OPEN_PLAN)).order("remind_on").limit(1)) if pids else []
+        if not plans:
+            return {"status": "no_plan", "pharmacy_phone": phone}
+        plan = plans[0]
+        if plan["status"] == "requested":
+            return {"status": "already_requested", "pharmacy_phone": phone}
+        try:
+            # unscoped: insert_scoped_by_payload
+            await sb(supabase.table("rx_refill_requests").insert({
+                "clinic_id": cid, "plan_id": plan["id"], "patient_id": plan["patient_id"], "channel": "voice"}))
+        except Exception as e:                            # noqa: BLE001 - uq_rx_refill_requests_open: already queued
+            if "uq_rx_refill_requests_open" not in str(e):
+                raise
+        await sb(_upd("rx_refill_plans", cid, {"status": "requested", "updated_at": datetime.now(timezone.utc).isoformat()})
+                 .eq("id", plan["id"]).in_("status", ["scheduled", "sent"]))
+    except Exception as e:                                # noqa: BLE001 - the caller is given the pharmacy's number
+        logger.error(f"Voice refill request failed clinic={cid} phone={mask_phone(caller_phone)}: {type(e).__name__}")
+        return {"status": "failed", "pharmacy_phone": phone}
+    return {"status": "requested", "pharmacy_phone": phone}

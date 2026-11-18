@@ -383,6 +383,21 @@ T: dict = {
         "hi": "नया सैंपल लेने का समय तय करने के लिए हमारी टीम आपको कॉल करेगी, घर पर या सेंटर पर।",
     },
     "info_answer": {"te": "{text}", "en": "{text}", "hi": "{text}"},
+    "rx_refill_received": {
+        "te": "మీ మందుల రీఫిల్ రిక్వెస్ట్ ఫార్మసీకి అందింది. ఫార్మసీ వారు కన్ఫర్మ్ చేస్తారు.",
+        "en": "Your refill request has reached the pharmacy. The pharmacy will confirm.",
+        "hi": "आपकी दवा दोबारा लेने की रिक्वेस्ट फार्मेसी को मिल गई है। फार्मेसी पुष्टि करेगी।",
+    },
+    "rx_refill_call_pharmacy": {
+        "te": "దయచేసి మా ఫార్మసీకి {pharmacy_phone} కి కాల్ చేయండి, లేదా కౌంటర్‌కి రండి.",
+        "en": "Please call our pharmacy at {pharmacy_phone}, or visit the counter.",
+        "hi": "कृपया हमारी फार्मेसी को {pharmacy_phone} पर कॉल करें, या काउंटर पर आइए।",
+    },
+    "rx_refill_visit_counter": {
+        "te": "దయచేసి మా ఫార్మసీ కౌంటర్‌కి రండి, వారు మీకు సహాయం చేస్తారు.",
+        "en": "Please visit our pharmacy counter; they will help you.",
+        "hi": "कृपया हमारे फार्मेसी काउंटर पर आइए, वे आपकी मदद करेंगे।",
+    },
     "info_unavailable": {
         "te": "క్షమించండి, ఆ సమాచారం నా దగ్గర లేదు. మా రిసెప్షన్ టీమ్‌కి కనెక్ట్ చేయమంటారా?",
         "en": "Sorry, I don't have that information. Shall I connect you to our reception team?",

@@ -112,6 +112,7 @@ _REJECTED = {
     "hypothetical": "I won't change anything for a \"what if\". Say it as an instruction when you're ready.",
     "clinical": "Kriya Ketu doesn't give medical advice, diagnoses or prescriptions. Doctors decide that "
                 "in the Consultation page.",
+    "medicine_advice": "Kriya doesn't advise on medicines. Please check with the treating doctor.",
     "not_available": "That page isn't available for your account.",
     "unsupported": "I can't do that yet. Try \"open appointments\" or \"go to leads\".",
     "multi": "Please send one request at a time.",

@@ -3768,6 +3768,22 @@
         .rxf-sup header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
         @media (max-width: 760px) { #pg-rxrefills td[data-label]::before { content: attr(data-label) " "; color: var(--text3); font-size: 0.72rem; } }
         /* RX:refills:END */
+        /* RX:dashboard:START — Pharmacy Dashboard (P9; docs/pharmacy-os/UI.md §9, ADVANCED-FEATURES A12) */
+        .rxd-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+        .rxd-controls .field { margin: 0; min-width: 150px; }
+        .rxd-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin: 12px 0; }
+        .rxd-tile { display: grid; gap: 4px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface2); text-align: left; color: var(--text); font: inherit; cursor: pointer; }
+        .rxd-tile:hover, .rxd-tile:focus-visible { border-color: var(--accent); }
+        .rxd-tile span { color: var(--text3); font-size: 0.8rem; }
+        .rxd-tile b { font-size: 1.45rem; font-variant-numeric: tabular-nums; }
+        .rxd-tile small { color: var(--text3); font-size: 0.78rem; }
+        .rxd-tile.bad { border-color: var(--red); background: var(--red-bg); }
+        .rxd-tile.bad b { color: var(--red); }
+        .rxd-tile.ok b { color: var(--green); }
+        .rxd-links { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        @media (max-width: 760px) { .rxd-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rxd-controls .field { flex: 1; min-width: calc(50% - 6px); }
+            #pg-rxdash td[data-label]::before { content: attr(data-label) " "; color: var(--text3); font-size: 0.72rem; } }
+        /* RX:dashboard:END */
     </style>
 </head>
 <body>
@@ -4109,6 +4125,11 @@
                     <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 20.5 3.5 13.5a4.95 4.95 0 1 1 7-7l7 7a4.95 4.95 0 1 1-7 7z"></path><path d="m8.5 8.5 7 7"></path></svg></span><span class="nav-group-title">Pharmacy</span><span class="nav-group-count" aria-hidden="true"></span><svg class="nav-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"></polyline></svg>
                 </button>
                 <div class="nav-group-body" id="navGrpRx" role="group" aria-labelledby="navGrpRxHead"><div class="nav-group-inner">
+            <!-- RX:dashboard:START -->
+            <div class="nav-link" tabindex="0" data-page="rxdash" data-rx="nav RX_READ RX_ADMIN" style="display:none" onclick="go('rxdash',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="12" width="7" height="9" rx="1.5"></rect><rect x="3" y="16" width="7" height="5" rx="1.5"></rect></svg></span><span>Pharmacy Dashboard</span>
+            </div>
+            <!-- RX:dashboard:END -->
             <!-- RX:pos:START -->
             <div class="nav-link" tabindex="0" data-page="rxpos" data-rx="nav RX_READ RX_DISPENSE RX_ADMIN" style="display:none" onclick="go('rxpos',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M7 20h10M12 16v4M7 9h4M7 12h2"></path></svg></span><span>Pharmacy POS</span>
@@ -8209,6 +8230,28 @@
             <div class="card"><div id="rxfBody" aria-live="polite"></div></div>
         </div>
         <!-- RX:refills:END -->
+        <!-- RX:dashboard:START — Pharmacy Dashboard page (docs/pharmacy-os/UI.md §9, A12, page rxdash) -->
+        <div id="pg-rxdash" class="sec">
+            <div class="page-head"><div><h2>Pharmacy Dashboard</h2><p>Today's counter and ward work, stock that needs attention, and yesterday's prescriptions the pharmacy did not fill.</p></div>
+                <div class="rxd-controls">
+                    <div class="field"><label for="rxdStore">Store</label><select id="rxdStore" onchange="rxdash.load()"><option value="">All my stores</option></select></div>
+                    <div class="field"><label for="rxdDate">Day</label><input type="date" id="rxdDate" onchange="rxdash.load()"></div>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.load()">Refresh</button>
+                </div></div>
+            <div class="rxd-tiles" id="rxdTiles" aria-live="polite"></div>
+            <div class="rxd-links" aria-label="Pharmacy pages">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.open('rxpos')">Pharmacy POS</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.open('rxindents')">Ward Indents</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.open('rxrefills')">Refills &amp; Alerts</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.open('rxstock')">Stock &amp; Expiry</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.open('rxregisters')">Drug Registers</button>
+            </div>
+            <div class="card">
+                <div class="page-head" style="margin-bottom:6px"><div><h3 style="margin:0">Lost-sale &amp; pending-balance call list</h3><p class="rx-sub" style="margin:4px 0 0">Prescriptions signed on <span id="rxdLostDay">yesterday</span> that the pharmacy did not bill, and part-filled ones with medicines still to give. Call the patient yourself; nothing is sent automatically.</p></div></div>
+                <div id="rxdLost" aria-live="polite"></div>
+            </div>
+        </div>
+        <!-- RX:dashboard:END -->
         <!-- DX:foundation:START — DX Setup page (docs/diagnostic-os/UI.md, page dxsetup) -->
         <div id="pg-dxsetup" class="sec">
             <div class="page-head">
@@ -12982,6 +13025,74 @@ const rxref = {
     },
 };
 /* RX:refills:END */
+
+/* RX:dashboard:START — Pharmacy Dashboard (P9; UI.md §9, A12). Margin is shown only to RX_ADMIN (the server sends
+   null to everyone else). The lost-sale list masks phones; Reveal phone is RX_DISPENSE and audited server-side. */
+const rxdash = {
+    stores: null, seq: 0,
+    open(page) { go(page, document.querySelector(`[data-page="${page}"]`)); },
+    tile(label, value, sub, page, cls) {
+        return `<button type="button" class="rxd-tile ${cls || ''}" onclick="rxdash.open('${page}')"><span>${esc(label)}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</button>`;
+    },
+    async load() {
+        applyRxGates();
+        const seq = ++rxdash.seq;
+        if (!rxdash.stores) {
+            try {
+                rxdash.stores = (await api('/admin/rx/stores')).stores.filter(s => s.is_active !== false);
+                document.getElementById('rxdStore').innerHTML = '<option value="">All my stores</option>' + rxdash.stores.map(s => `<option value="${esc(s.id)}">${esc(s.code)} · ${esc(s.name)}</option>`).join('');
+            } catch (e) { rxdash.stores = []; }
+        }
+        const p = new URLSearchParams(), store = document.getElementById('rxdStore').value, day = document.getElementById('rxdDate').value;
+        if (store) p.set('store_id', store);
+        if (day) p.set('date', day);
+        const tiles = document.getElementById('rxdTiles');
+        tiles.innerHTML = loading();
+        let d;
+        try { d = await api('/admin/rx/dashboard?' + p); } catch (e) { tiles.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+        if (seq !== rxdash.seq) return;
+        const chain = d.register_chain_status || {};
+        tiles.innerHTML = [
+            rxdash.tile('Sales today', rxRs(d.sales_today_paise), `${d.sales_count} bill${d.sales_count === 1 ? '' : 's'}`, 'rxpos'),
+            rxdash.tile('Returns', rxRs(d.returns_today_paise), `${d.returns_count} return${d.returns_count === 1 ? '' : 's'}`, 'rxpos'),
+            rxdash.tile('Pending ward indents', esc(d.pending_indents_count), d.stat_indents_count ? `<span class="rx-badge e-expired">${esc(d.stat_indents_count)} STAT</span>` : 'none STAT', 'rxindents', d.stat_indents_count ? 'bad' : ''),
+            rxdash.tile('Refill requests', esc(d.pending_refill_requests_count), 'waiting for the pharmacist', 'rxrefills'),
+            rxdash.tile('Below reorder level', esc(d.low_stock_count), 'items', 'rxstock'),
+            rxdash.tile('Expiring in 90 days', rxRs(d.near_expiry_value_paise), `${esc(d.near_expiry_batches || 0)} batches (cost value)`, 'rxstock'),
+            rxdash.tile('Expired on shelf', esc(d.expired_on_hand_count), d.expired_on_hand_count ? rxRs(d.expired_on_hand_value_paise) + ' to write off or return' : 'nothing expired', 'rxstock', d.expired_on_hand_count ? 'bad' : ''),
+            rxdash.tile('Open alerts', esc(d.unack_alerts_count), 'stock and integrity', 'rxrefills'),
+            rxdash.tile('Drug registers', chain.ok ? '✓ Intact' : '✕ Tampered', chain.ok ? 'hash chains verified nightly' : (chain.breaks || []).map(b => `${esc(b.register)} at entry ${esc(b.first_bad_seq)}`).join(', '), 'rxregisters', chain.ok ? 'ok' : 'bad'),
+            ...(d.gross_margin_paise != null ? [rxdash.tile('Gross margin', (d.gross_margin_paise < 0 ? '−' : '') + rxRs(Math.abs(d.gross_margin_paise)), d.gross_margin_bps != null ? `${(d.gross_margin_bps / 100).toFixed(1)}% of taxable value` : 'no sales yet', 'rxpos')] : []),
+        ].join('');
+        rxdash.loadLost();
+    },
+    async loadLost() {
+        const box = document.getElementById('rxdLost');
+        box.innerHTML = loading();
+        let r;
+        try { r = await api('/admin/rx/lost-sales'); } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+        document.getElementById('rxdLostDay').textContent = new Date(r.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        const reveal = rxCan('RX_DISPENSE') || rxCan('RX_ADMIN');
+        const head = ['Patient', 'Phone', 'Doctor', 'Signed', 'Still to give', 'Type'];
+        box.innerHTML = r.rows.length ? `<div class="tbl-wrap"><table class="rxi-orders"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${r.rows.map(x => `<tr>
+            <td data-label="Patient"><b>${esc(x.patient_name || '—')}</b>${x.mrn ? `<br><small class="rx-sub">${esc(x.mrn)}</small>` : ''}</td>
+            <td data-label="Phone"><span id="rxdPh-${esc(x.prescription_id)}">${esc(x.phone_masked || '—')}</span>${reveal && x.phone_masked ? ` <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.reveal('${esc(x.prescription_id)}', this)">Reveal phone</button>` : ''}</td>
+            <td data-label="Doctor">${esc(x.doctor_name || '—')}</td>
+            <td data-label="Signed">${esc(rxind.when(x.signed_at))}</td>
+            <td data-label="Still to give">${x.items.map(i => `${esc(i.drug_name)}${i.strength ? ' ' + esc(i.strength) : ''}${i.pending_units != null ? ` <small class="rx-sub">(${esc(i.pending_units)})</small>` : ''}`).join(', ')}</td>
+            <td data-label="Type">${x.type === 'unbilled_rx' ? 'Not billed' : 'Part-filled'}</td></tr>`).join('')}</tbody></table></div>`
+            : '<p class="muted">Every prescription signed that day was filled by the pharmacy. ✓</p>';
+    },
+    async reveal(id, btn) {
+        btn.disabled = true;
+        try {
+            const r = await apiPost(`/admin/rx/lost-sales/${encodeURIComponent(id)}/reveal-phone`, {});
+            document.getElementById('rxdPh-' + id).textContent = r.phone;
+            btn.remove();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+};
+/* RX:dashboard:END */
 
 /* DX:foundation:START — Diagnostic OS (migration 125). Mirrors app.services.permissions
    holds_dx_permission; the server re-checks every call, hiding here is convenience only. */
@@ -20914,7 +21025,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ /* RX:pos:START */, rxpos: () => rxpos.load() /* RX:pos:END */ /* RX:ipd:START */, rxindents: () => rxind.load() /* RX:ipd:END */ /* RX:transfers:START */, rxtransfers: () => rxtr.load() /* RX:transfers:END */ /* RX:audit:START */, rxaudit: () => rxaud.load() /* RX:audit:END */ /* RX:registers:START */, rxregisters: () => rxreg.load() /* RX:registers:END */ /* RX:refills:START */, rxrefills: () => rxref.load() /* RX:refills:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ /* RX:pos:START */, rxpos: () => rxpos.load() /* RX:pos:END */ /* RX:ipd:START */, rxindents: () => rxind.load() /* RX:ipd:END */ /* RX:transfers:START */, rxtransfers: () => rxtr.load() /* RX:transfers:END */ /* RX:audit:START */, rxaudit: () => rxaud.load() /* RX:audit:END */ /* RX:registers:START */, rxregisters: () => rxreg.load() /* RX:registers:END */ /* RX:refills:START */, rxrefills: () => rxref.load() /* RX:refills:END */ /* RX:dashboard:START */, rxdash: () => rxdash.load() /* RX:dashboard:END */ };
     if (loaders[page]) loaders[page]();
 }
 

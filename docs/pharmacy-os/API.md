@@ -282,6 +282,42 @@ Ketu reuses the routes above in-process with the speaker's session. One extra re
 nearest_expiry, substitutes_in_stock:[{brand, qty}]}], resolved_by:'barcode'|'alias'|'trgm'}` — used for "Is Augmentin
 625 in stock?" (KRIYA-KETU.md).
 
+P9 notes (as built, no migration — 4 routes, route pin 114):
+- `GET /stock/answer?q=` (RX_READ / RX_ADMIN / IPD_NURSING) → `{status: match | out_of_stock | ambiguous | not_found,
+  query, resolved_by, matches:[{item, generic, stores:[{store_id, store_name, store_code, qty_units, packs_loose,
+  nearest_expiry}], substitutes_in_stock:[{item_id, brand_name, qty_units}]}]}`. Resolution is `rx_resolve_items`:
+  barcode → `barcode`; alias or exact item code → `alias`; brand / generic substring → `trgm`. Confident = barcode /
+  alias / code, a single candidate, or a top score ≥ 85 ahead of the next; otherwise `ambiguous` with up to 3
+  candidates and no stock. Same-generic items in stock are listed as data only; no route returns advice text. A login
+  with IPD_NURSING and no RX_READ / RX_TRANSFER / RX_ADMIN gets counts for ward-type stores in scope only, plus
+  `available_at_pharmacy` (true / false), and `qty_units: null` on substitutes. Blank `q` → `not_found`.
+- `GET /dashboard?store_id&date` (RX_READ / RX_ADMIN; IST day, default today): `sales_today_paise`, `sales_count`,
+  `returns_today_paise`, `returns_count`, `pending_indents_count`, `stat_indents_count`,
+  `pending_refill_requests_count` (new + verified), `low_stock_count`, `near_expiry_value_paise` / `near_expiry_batches`
+  (≤ 90 days, cost value), `expired_on_hand_count` / `_value_paise`, `unack_alerts_count`, `register_chain_status`
+  `{ok, checked: 'nightly', breaks}` (from the nightly scan's unacknowledged `register_chain_break` alerts — the
+  dashboard never re-walks the chains), `gross_margin_paise` / `gross_margin_bps` (Σ taxable − Σ qty × batch landed
+  cost; **null unless RX_ADMIN**).
+- `GET /lost-sales?date` (RX_READ / RX_DISPENSE / RX_ADMIN; default yesterday IST): signed OPD prescriptions of that
+  day with no completed pharmacy sale (`unbilled_rx`, every line with its prescribed units) or with lines still
+  pending (`partial_fulfilment`); `{prescription_id, type, signed_at, doctor_name, patient_name, mrn, phone_masked,
+  items:[{drug_name, strength, pending_units, prescribed_units}]}`. Clinic-wide (prescriptions carry no store).
+  `POST /lost-sales/{prescription_id}/reveal-phone` (RX_DISPENSE / RX_ADMIN) → the full number; *audit:
+  rx_lost_sale_phone_reveal*. Nothing on the list sends a message.
+- Ketu (`app/assistant/registry.py`, `_rx_on` / `_rx`): R0 reads `rx.stock_lookup` (`/stock/answer`),
+  `rx.batch_expiry` (`/stock?q=` — nearest expiry per item; `/batches` needs an item id the sentence does not give),
+  `rx.low_stock` (`/stock?below_reorder=true`), `rx.near_expiry` (`/expiry?days=90`), `rx.pending_indents`,
+  `rx.my_ward_indent_status`, `rx.refill_requests`, `rx.today_summary` (`/dashboard`), `rx.find_bill` (`/sales?q=`
+  bill number); H hand-offs `rx.sell`, `rx.dispense_indent`, `rx.raise_indent`, `rx.receive_grn`,
+  `rx.register_export`. No write action. Medicine-advice questions (substitutes, doses, interactions, safety) get the
+  fixed "Kriya doesn't advise on medicines. Please check with the treating doctor." (`medicine_advice`), except
+  phrases already in the clinical list ("dose of", "dosage"), which keep the general clinical refusal. A staff
+  question about a named drug's stock / expiry / bill skips the patient drug-name firewall; nothing else does.
+- Voice `PHARMACY_REFILL` (`refill`, `repeat medicine`, `दवा दोबारा`, `మందులు మళ్ళీ` …): `rx_refills.voice_request`
+  creates `rx_refill_requests (channel='voice')` on the caller's own open plan when the pharmacy is ACTIVE; otherwise
+  the caller hears the pharmacy number (`config.pharmacy_phone` → staff / clinic phone) or "visit the counter".
+  `PHARMACY_INFORMATION` is unchanged (hours / location / phone only; never stock).
+
 ## 11. Route count guard
 DG2 asserts the `/admin/rx` route count (pinned per phase; the number is updated in the same commit that adds a route
 and recorded in status §9) in `tests/test_rx_feature_gate.py` and that every route is

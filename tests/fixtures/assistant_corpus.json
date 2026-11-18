@@ -5144,6 +5144,349 @@
    "expect": "action:opd.collections",
    "lang": "en",
    "near": "dx.today_summary"
+  },
+  {
+   "text": "is augmentin 625 in stock",
+   "expect": "action:rx.stock_lookup",
+   "lang": "en"
+  },
+  {
+   "text": "do we have dolo 650 in stock",
+   "expect": "action:rx.stock_lookup",
+   "lang": "en"
+  },
+  {
+   "text": "is pantop 40 available in pharmacy",
+   "expect": "action:rx.stock_lookup",
+   "lang": "en"
+  },
+  {
+   "text": "augmentin 625 stock hai",
+   "expect": "action:rx.stock_lookup",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "dolo 650 stock undha",
+   "expect": "action:rx.stock_lookup",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "ఆగ్మెంటిన్ 625 స్టాక్ ఉందా",
+   "expect": "action:rx.stock_lookup",
+   "lang": "te"
+  },
+  {
+   "text": "ऑगमेंटिन 625 है क्या",
+   "expect": "action:rx.stock_lookup",
+   "lang": "hi"
+  },
+  {
+   "text": "open pharmacy stock",
+   "expect": "nav:rxstock",
+   "lang": "en",
+   "near": "rx.stock_lookup"
+  },
+  {
+   "text": "what is running low",
+   "expect": "action:rx.low_stock",
+   "lang": "en",
+   "near": "rx.stock_lookup"
+  },
+  {
+   "text": "expiry of dolo 650 batches",
+   "expect": "action:rx.batch_expiry",
+   "lang": "en"
+  },
+  {
+   "text": "expiry date of augmentin 625",
+   "expect": "action:rx.batch_expiry",
+   "lang": "en"
+  },
+  {
+   "text": "batch expiry of pantop 40",
+   "expect": "action:rx.batch_expiry",
+   "lang": "en"
+  },
+  {
+   "text": "dolo ki expiry",
+   "expect": "action:rx.batch_expiry",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "dolo 650 batch expiry cheppu",
+   "expect": "action:rx.batch_expiry",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "near expiry medicines",
+   "expect": "action:rx.near_expiry",
+   "lang": "en",
+   "near": "rx.batch_expiry"
+  },
+  {
+   "text": "open stock and expiry",
+   "expect": "nav:rxstock",
+   "lang": "en",
+   "near": "rx.batch_expiry"
+  },
+  {
+   "text": "what is running low in the pharmacy",
+   "expect": "action:rx.low_stock",
+   "lang": "en"
+  },
+  {
+   "text": "medicines below reorder level",
+   "expect": "action:rx.low_stock",
+   "lang": "en"
+  },
+  {
+   "text": "show low stock medicines",
+   "expect": "action:rx.low_stock",
+   "lang": "en"
+  },
+  {
+   "text": "kya khatam ho raha hai",
+   "expect": "action:rx.low_stock",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "e medicines taggipothunna",
+   "expect": "action:rx.low_stock",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open drug master",
+   "expect": "nav:rxitems",
+   "lang": "en",
+   "near": "rx.low_stock"
+  },
+  {
+   "text": "pending ward indents",
+   "expect": "action:rx.pending_indents",
+   "lang": "en",
+   "near": "rx.low_stock"
+  },
+  {
+   "text": "near expiry medicines",
+   "expect": "action:rx.near_expiry",
+   "lang": "en"
+  },
+  {
+   "text": "medicines expiring soon",
+   "expect": "action:rx.near_expiry",
+   "lang": "en"
+  },
+  {
+   "text": "show near expiry stock",
+   "expect": "action:rx.near_expiry",
+   "lang": "en"
+  },
+  {
+   "text": "expiry wali dawa dikhao",
+   "expect": "action:rx.near_expiry",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "expiry daggara unna medicines",
+   "expect": "action:rx.near_expiry",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "expiry of dolo 650 batches",
+   "expect": "action:rx.batch_expiry",
+   "lang": "en",
+   "near": "rx.near_expiry"
+  },
+  {
+   "text": "open expiry returns",
+   "expect": "nav:rxrefills",
+   "lang": "en",
+   "near": "rx.near_expiry"
+  },
+  {
+   "text": "pending ward indents",
+   "expect": "action:rx.pending_indents",
+   "lang": "en"
+  },
+  {
+   "text": "show stat indents",
+   "expect": "action:rx.pending_indents",
+   "lang": "en"
+  },
+  {
+   "text": "how many indents pending",
+   "expect": "action:rx.pending_indents",
+   "lang": "en"
+  },
+  {
+   "text": "kitne indent pending hain",
+   "expect": "action:rx.pending_indents",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "indents enni pending unnayi",
+   "expect": "action:rx.pending_indents",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open ward indents",
+   "expect": "nav:rxindents",
+   "lang": "en",
+   "near": "rx.pending_indents"
+  },
+  {
+   "text": "dispense ward 3 indent",
+   "expect": "action:rx.dispense_indent",
+   "lang": "en",
+   "near": "rx.pending_indents"
+  },
+  {
+   "text": "has pharmacy sent bed 12 medicines",
+   "expect": "action:rx.my_ward_indent_status",
+   "lang": "en"
+  },
+  {
+   "text": "pharmacy sent the medicines for my ward",
+   "expect": "action:rx.my_ward_indent_status",
+   "lang": "en"
+  },
+  {
+   "text": "has pharmacy sent the indent medicines",
+   "expect": "action:rx.my_ward_indent_status",
+   "lang": "en"
+  },
+  {
+   "text": "bed 12 ki dawa aayi",
+   "expect": "action:rx.my_ward_indent_status",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "bed 12 mandulu vachaya",
+   "expect": "action:rx.my_ward_indent_status",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "raise indent for bed 12",
+   "expect": "action:rx.raise_indent",
+   "lang": "en",
+   "near": "rx.my_ward_indent_status"
+  },
+  {
+   "text": "open ward indents",
+   "expect": "nav:rxindents",
+   "lang": "en",
+   "near": "rx.my_ward_indent_status"
+  },
+  {
+   "text": "new refill requests",
+   "expect": "action:rx.refill_requests",
+   "lang": "en"
+  },
+  {
+   "text": "refill requests today",
+   "expect": "action:rx.refill_requests",
+   "lang": "en"
+  },
+  {
+   "text": "pending refill requests",
+   "expect": "action:rx.refill_requests",
+   "lang": "en"
+  },
+  {
+   "text": "aaj refill ke request kitne hain",
+   "expect": "action:rx.refill_requests",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ivala refill requests enni",
+   "expect": "action:rx.refill_requests",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open refill requests page",
+   "expect": "nav:rxrefills",
+   "lang": "en",
+   "near": "rx.refill_requests"
+  },
+  {
+   "text": "pharmacy sales today",
+   "expect": "action:rx.today_summary",
+   "lang": "en",
+   "near": "rx.refill_requests"
+  },
+  {
+   "text": "pharmacy sales today",
+   "expect": "action:rx.today_summary",
+   "lang": "en"
+  },
+  {
+   "text": "today's pharmacy summary",
+   "expect": "action:rx.today_summary",
+   "lang": "en"
+  },
+  {
+   "text": "medical store sales today",
+   "expect": "action:rx.today_summary",
+   "lang": "en"
+  },
+  {
+   "text": "aaj pharmacy ki sale kitni",
+   "expect": "action:rx.today_summary",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ivala pharmacy sales entha",
+   "expect": "action:rx.today_summary",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open pharmacy dashboard",
+   "expect": "nav:rxdash",
+   "lang": "en",
+   "near": "rx.today_summary"
+  },
+  {
+   "text": "today's collection",
+   "expect": "action:opd.collections",
+   "lang": "en",
+   "near": "rx.today_summary"
+  },
+  {
+   "text": "find bill PHS-2026-000431",
+   "expect": "action:rx.find_bill",
+   "lang": "en"
+  },
+  {
+   "text": "find pharmacy bill PHS-2026-000012",
+   "expect": "action:rx.find_bill",
+   "lang": "en"
+  },
+  {
+   "text": "bill number PHS-2026-000077",
+   "expect": "action:rx.find_bill",
+   "lang": "en"
+  },
+  {
+   "text": "PHS-2026-000431 bill dhundo",
+   "expect": "action:rx.find_bill",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "PHS-2026-000431 bill vetuku",
+   "expect": "action:rx.find_bill",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open pharmacy pos",
+   "expect": "nav:rxpos",
+   "lang": "en",
+   "near": "rx.find_bill"
+  },
+  {
+   "text": "bill lakshmi's prescription",
+   "expect": "action:rx.sell",
+   "lang": "en",
+   "near": "rx.find_bill"
   }
  ],
  "doctors": [

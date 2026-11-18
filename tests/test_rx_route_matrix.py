@@ -75,6 +75,9 @@ RX_ROUTES = {
     ("POST", "/admin/rx/refills/requests/{request_id}/pack"), ("POST", "/admin/rx/refills/requests/{request_id}/reject"),
     ("GET", "/admin/rx/refills/plans"), ("POST", "/admin/rx/refills/plans/{plan_id}/cancel"),
     ("GET", "/admin/rx/alerts"), ("POST", "/admin/rx/alerts/{alert_id}/ack"), ("GET", "/admin/rx/expiry/return-plan"),
+    # P9 Ketu stock answer, dashboard, lost-sale call list (no migration)
+    ("GET", "/admin/rx/stock/answer"), ("GET", "/admin/rx/dashboard"), ("GET", "/admin/rx/lost-sales"),
+    ("POST", "/admin/rx/lost-sales/{prescription_id}/reveal-phone"),
 }
 
 
@@ -308,3 +311,26 @@ def test_p8_role_matrix(api, role, grants):  # noqa: F811
     alerts = api.call("GET", "/admin/rx/alerts", clinic).status_code
     plan = api.call("GET", "/admin/rx/expiry/return-plan", clinic, store_id=str(uuid.uuid4())).status_code
     assert (queue, verify, alerts, plan) == P8_MATRIX[(role, grants)]
+
+
+# P9: (role, stored grants) -> expected status for: stock answer, dashboard, lost-sale list, reveal an unknown
+# prescription's phone (404 when allowed).
+P9_MATRIX = {
+    ("PHARMACY_MANAGER", ()): (200, 200, 200, 404),
+    ("PHARMACIST", ()): (200, 200, 200, 404),
+    ("STORE_KEEPER", ()): (200, 200, 200, 403),               # reads the list; never sees a full phone
+    ("NURSE", ("IPD_NURSING",)): (200, 403, 403, 403),       # stock answer only (ward scope)
+    ("CASHIER", ("OPD_BILLING",)): (403, 403, 403, 403),
+}
+
+
+@pytest.mark.parametrize("role,grants", sorted(P9_MATRIX))
+def test_p9_role_matrix(api, role, grants):  # noqa: F811
+    clinic = _clinic(api.conn)
+    assert api.owner_toggle(clinic, "pharmacy_enabled", True).status_code == 200
+    api.as_(api.U(role.lower(), "staff", clinic, str(uuid.uuid4()), list(grants), staff_role=role))
+    answer = api.call("GET", "/admin/rx/stock/answer", clinic, q="dolo").status_code
+    dash = api.call("GET", "/admin/rx/dashboard", clinic).status_code
+    lost = api.call("GET", "/admin/rx/lost-sales", clinic).status_code
+    reveal = api.call("POST", f"/admin/rx/lost-sales/{uuid.uuid4()}/reveal-phone", clinic).status_code
+    assert (answer, dash, lost, reveal) == P9_MATRIX[(role, grants)]

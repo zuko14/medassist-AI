@@ -46,6 +46,8 @@ READS = {
     "opd.collections", "opd.unpaid", "holidays.list",  # 2026-10-26: everyday questions from the probe
     "dx.pending_by_stage", "dx.tat_breaches", "dx.my_approvals", "dx.critical_open", "dx.find_visit",  # DX (P9)
     "dx.held_dues", "dx.today_summary",
+    "rx.stock_lookup", "rx.batch_expiry", "rx.low_stock", "rx.near_expiry", "rx.pending_indents",  # RX (P9)
+    "rx.my_ward_indent_status", "rx.refill_requests", "rx.today_summary", "rx.find_bill",
 }
 NOT_YET = {"patient.view", "voice.call_detail", "patient.duplicate_check", "voice.test_turn"}
 CORPUS = json.loads((Path(__file__).parent / "fixtures" / "assistant_corpus.json")
@@ -273,6 +275,24 @@ DATA = {
                                      "status": "in_process", "priority": "routine", "created_at": "2026-11-15T04:30:00Z"}]},
     "/admin/dx/deliveries": {"deliveries": [{"accession_number": "LAB-2026-000009", "patient_name": "Sita Devi",
                                              "target": "patient", "dues_paise": 35000}]},
+    "/admin/rx/stock/answer": {"status": "match", "query": "augmentin 625", "resolved_by": "trgm", "matches": [{
+        "item": {"brand_name": "Augmentin 625 Duo", "base_unit": "tablet", "pack_size": 10},
+        "generic": {"name": "Amoxicillin + Clavulanic acid", "strength": "500 mg + 125 mg", "dosage_form": "tablet"},
+        "stores": [{"store_name": "OPD Counter", "qty_units": 64, "packs_loose": {"packs": 6, "loose": 4},
+                    "nearest_expiry": "2027-03-31"}], "substitutes_in_stock": []}]},
+    "/admin/rx/stock": {"stock": [{"item": {"brand_name": "Dolo 650", "reorder_level_units": 100}, "qty_units": 40,
+                                   "nearest_expiry": "2027-01-31"}]},
+    "/admin/rx/expiry": {"buckets": {"le_30": [{"item": {"brand_name": "Pantop 40"}, "batch_no": "PT9", "qty_units": 30,
+                                                "expiry_date": "2026-12-01", "days_left": 20}]}},
+    "/admin/rx/ipd/indents": {"indents": [{"indent_number": "IND-2026-00004", "priority": "stat", "ward": "Ward 3",
+                                           "bed": "12", "patient_name": "Ravi Kumar", "status": "raised",
+                                           "raised_at": "2026-11-18T04:30:00Z"}]},
+    "/admin/rx/refills/requests": {"requests": [{"patient": {"name": "Lakshmi Devi"}, "item": {"brand_name": "Glycomet 500"},
+                                                 "created_at": "2026-11-18T04:30:00Z", "channel": "whatsapp"}]},
+    "/admin/rx/dashboard": {"sales_today_paise": 1250000, "sales_count": 41, "pending_indents_count": 2,
+                            "register_chain_status": {"ok": True}},
+    "/admin/rx/sales": {"sales": [{"sale_number": "PHS-2026-000431", "status": "completed", "net_paise": 45000,
+                                   "completed_at": "2026-11-18T04:30:00Z"}]},
 }
 
 
@@ -347,11 +367,20 @@ CASES = [
     ("LAB-2026-123 status", "dx.find_visit", "/admin/dx/visits", {"q": "LAB-2026-000123"}, "Ramana Babu", 1),
     ("reports held for payment", "dx.held_dues", "/admin/dx/deliveries", {"status": "held_dues"}, "₹350", 1),
     ("today's lab summary", "dx.today_summary", "/admin/dx/dashboard", {}, "₹9,000", None),
+    ("is augmentin 625 in stock", "rx.stock_lookup", "/admin/rx/stock/answer", {"q": "augmentin 625"}, "6 strips", 1),
+    ("expiry of dolo 650 batches", "rx.batch_expiry", "/admin/rx/stock", {"q": "dolo 650"}, "Dolo 650", 1),
+    ("what is running low", "rx.low_stock", "/admin/rx/stock", {"below_reorder": "true"}, "Dolo 650", 1),
+    ("near expiry medicines", "rx.near_expiry", "/admin/rx/expiry", {"days": "90"}, "Pantop 40", 1),
+    ("pending ward indents", "rx.pending_indents", "/admin/rx/ipd/indents", {"status": "raised"}, "IND-2026-00004", 1),
+    ("has pharmacy sent bed 12 medicines", "rx.my_ward_indent_status", "/admin/rx/ipd/indents", {}, "Ward 3", 1),
+    ("new refill requests", "rx.refill_requests", "/admin/rx/refills/requests", {"status": "new"}, "Glycomet 500", 1),
+    ("pharmacy sales today", "rx.today_summary", "/admin/rx/dashboard", {}, "₹12,500", None),
+    ("find bill PHS-2026-000431", "rx.find_bill", "/admin/rx/sales", {"q": "PHS-2026-000431"}, "PHS-2026-000431", 1),
 ]
 EVERYTHING_ON = {"id": CID, "plan": "diagbooking", "account_type": "tenant", "opd_state": "READY",
                  "features": {"kriya_ketu": True, "opd_enabled": True, "ai_receptionist": True, "booking": True,
                               "specialty_treatments": True, "ipd_enabled": True,
-                              "dx_enabled": True}}
+                              "dx_enabled": True, "pharmacy_enabled": True}}
 
 client = TestClient(app)
 
@@ -437,7 +466,10 @@ def test_handler_reads_are_the_expected_ones():
                                   "ipd.discharges", "orders.to_collect", "lis.pending_signoff", "emergency.board",
                                   "services.prices", "ipd_finance.receivables", "ot.today",
                                   "dx.pending_by_stage", "dx.tat_breaches", "dx.my_approvals", "dx.critical_open",
-                                  "dx.find_visit", "dx.held_dues", "dx.today_summary"}
+                                  "dx.find_visit", "dx.held_dues", "dx.today_summary",
+                                  "rx.stock_lookup", "rx.batch_expiry", "rx.low_stock", "rx.near_expiry",
+                                  "rx.pending_indents", "rx.my_ward_indent_status", "rx.refill_requests",
+                                  "rx.today_summary", "rx.find_bill"}
 
 
 @pytest.mark.parametrize("aid", HANDLER_READS)
