@@ -1672,7 +1672,10 @@ def branch_rows(data, active_only: bool = False) -> list:
 def _match_branch(branches: list, term: str) -> list:
     """An exact name wins, so "Main" is not ambiguous beside "Main Road"; else every name containing it."""
     exact = [b for b in branches if " ".join(str(b.get("name") or "").lower().split()) == term]
-    return exact or [b for b in branches if term in str(b.get("name") or "").lower()]
+    found = exact or [b for b in branches if term in str(b.get("name") or "").lower()]
+    rest = term.split(" ", 1)[1] if " " in term else ""
+    # speech puts a stray word before the name ("both shifts Kukatpally branch"); the preview shows the pick
+    return found or (_match_branch(branches, rest) if rest else [])
 
 
 async def doctor_create_preview(read, params: dict) -> dict:

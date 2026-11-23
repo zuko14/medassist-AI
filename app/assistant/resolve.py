@@ -746,9 +746,13 @@ _SPECIALTY = (r"(?:[A-Za-z]+(?:logy|logist|logists|ics|iatry|iatrist|iatrician|e
               r"orthopedics|ortho|paediatrics|pediatrics|gynaecology|gynecology|obstetrics|cardiac|neuro)")
 # Said with no "is" ("and also the department dermatology"): only a specialty-looking word counts.
 _STATED_BARE = {
-    "specialization": re.compile(r"\b(?:speciali[sz]ation|specialty|speciality)\s+(?:of\s+|in\s+)?(" + _SPECIALTY
-                                 + r")\b", re.I),
-    "department": re.compile(r"\b(?:department|dept)\s+(?:of\s+|in\s+)?(" + _SPECIALTY + r")\b", re.I),
+    # also spoken as "specialist in dermatology" / "dermatology specialist"
+    "specialization": re.compile(r"\b(?:speciali[sz]ation|specialty|speciality|speciali[sz]t\s+(?:in|of|for))\s+"
+                                 r"(?:of\s+|in\s+)?(?:the\s+)?(" + _SPECIALTY + r")\b|\b(" + _SPECIALTY
+                                 + r")\s+speciali[sz]t\b", re.I),
+    # also spoken as "dermatology department"
+    "department": re.compile(r"\b(?:department|dept)\s+(?:of\s+|in\s+)?(" + _SPECIALTY + r")\b|\b(" + _SPECIALTY
+                             + r")\s+(?:department|dept)\b", re.I),
 }
 
 
@@ -757,16 +761,18 @@ def resolve_stated(text: str, field: str) -> Optional[str]:
     2..60 chars, else None."""
     rx = _STATED.get(field)
     m = (rx.search(text or "") or _STATED_BARE[field].search(text or "")) if rx else None
-    value = " ".join(m.group(1).split()) if m else ""
+    value = " ".join(next((g for g in m.groups() if g), "").split()) if m else ""
     return value[:1].upper() + value[1:] if 2 <= len(value) <= 60 else None
 
 
 def resolve_branch(text: str) -> Optional[str]:
     """The branch named before the word "branch" (lower-cased search words), else None."""
-    m = _BRANCH_NAME.search(text or "")
-    words = [w for w in (m.group(1).lower().split() if m else []) if w not in _BRANCH_NOISE]
-    term = " ".join(words)
-    return term if 2 <= len(term) <= 60 else None
+    # every "... branch", not just the first: "the branch he works in is Kukatpally branch" names it second
+    for m in _BRANCH_NAME.finditer(text or ""):
+        term = " ".join(w for w in m.group(1).lower().split() if w not in _BRANCH_NOISE)
+        if 2 <= len(term) <= 60:
+            return term
+    return None
 
 
 def doctor_profile_facets(text: str) -> set:

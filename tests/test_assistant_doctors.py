@@ -95,7 +95,7 @@ def test_resolve_new_doctor(text, name):
     ("specialisation is general medicine, department is OPD", "specialization", "General medicine"),
     ("specialisation is general medicine, department is OPD", "department", "OPD"),
     ("Add Dr Kiran Kumar, dermatologist, ₹600", "specialization", None),  # a mention is not a statement
-    ("create the doctor srikanth cardiology department", "department", None),
+    ("create the doctor srikanth cardiology department", "department", "Cardiology"),  # said outright
 ])
 def test_resolve_stated(text, field, value):
     assert resolve.resolve_stated(text, field) == value

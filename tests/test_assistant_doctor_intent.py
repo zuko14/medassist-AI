@@ -108,6 +108,11 @@ def test_spoken_session_hours():
     ("department is cardiology and he's from Ameerpet", "department", "Cardiology"),
     ("the department of Dr Rao", "department", None),            # a mention, not a value
     ("Add Dr Kiran Kumar, dermatologist, ₹600", "specialization", None),
+    # spoken forms from the voice panel (specialist in X / X department / X specialist)
+    ("who was the specialist in dermatology department.", "specialization", "Dermatology"),
+    ("who was the specialist in dermatology department.", "department", "Dermatology"),
+    ("he is a cardiology specialist", "specialization", "Cardiology"),
+    ("works in the orthopaedics dept", "department", "Orthopaedics"),
 ])
 def test_resolve_stated_bare_specialty(text, field, value):
     assert resolve.resolve_stated(text, field) == value
@@ -126,6 +131,27 @@ def test_day_words_only(text, days):
 def test_branch_from_a_spoken_profile():
     assert resolve.resolve_branch(SAID_2) == "ameerpet"
     assert resolve.resolve_branch("assign Dr Rao to Kukatpally branch mornings") == "kukatpally"  # unchanged
+    # the first "branch" carries no name; the second does
+    assert resolve.resolve_branch("and the branch he was operating in both shifts is Kukatpally branch") == "kukatpally"
+    assert resolve.resolve_branch("the branch he works at") is None
+
+
+def test_match_branch_skips_a_stray_leading_word():
+    from app.assistant.playbooks import _match_branch
+    rows = [{"id": 1, "name": "Kukatpally"}, {"id": 2, "name": "Ameerpet"}]
+    assert [b["id"] for b in _match_branch(rows, "shifts kukatpally")] == [1]
+    assert _match_branch(rows, "shifts madhapur") == []
+
+
+def test_the_dermatology_profile_from_the_voice_panel_adds_a_doctor():
+    said = ("Add Dr. Aditya Verma, who was the specialist in dermatology department. His morning slot timings are "
+            "from 10 o'clock to 1 o'clock and evening slot timings are from 6 o'clock to 9 o'clock and his fees is "
+            "about 1000 rupees and the branch he was operating in both shifts is Kukatpally branch.")
+    r = rules.route(said, doctors=DOCTORS, now=NOW)
+    assert (r.kind, r.action_id, r.missing) == ("action", "doctor.create", ()), r
+    assert r.params == {"name": "Dr. Aditya Verma", "specialization": "Dermatology", "department": "Dermatology",
+                        "fee": ["amount", "1000"], "morning": "10:00-13:00", "evening": "18:00-21:00",
+                        "branch": "kukatpally", "days": "Mon,Tue,Wed,Thu,Fri", "assumed": ["days"]}
 
 
 # ── routing ──────────────────────────────────────────────────────────────────
