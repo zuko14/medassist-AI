@@ -30,6 +30,8 @@ class WhatsAppMessage(BaseModel):
     interactive: Optional[WhatsAppInteractive] = None
     # A shared location pin: {"latitude", "longitude", "name"?, "address"?}.
     location: Optional[dict] = None
+    # A photo: {"id", "mime_type", "caption"?} — used only by a pharmacy's "Send prescription" step (migration 150).
+    image: Optional[dict] = None
 
 
 class WhatsAppContact(BaseModel):

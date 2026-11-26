@@ -233,7 +233,7 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | RX-D3 | Offline OTC POS queue | G15 — conflicts with server-enforced guarantees |
 | RX-D4 | Home delivery logistics for refills | O-6 |
 | RX-D5 | Cold-chain temperature logging | G28 |
-| RX-D6 | Standalone retail pharmacy without OPD | G30 |
+| RX-D6 | Standalone retail pharmacy without OPD | G30 — planned as the `pharmacy` plan in [RETAIL-PLAN.md](RETAIL-PLAN.md) (lane RXR, 2026-11-24) |
 | RX-D7 | Per-store login pins (`RX_STORE:<uuid>`) | staff grants are validated against `PERMISSIONS`; P1 scopes by branch (SECURITY §3.3) |
 
 ## 7. Audit deltas (lines that moved / findings that changed)

@@ -1,0 +1,99 @@
+{
+ "pack": "postnatal",
+ "cases": [
+  {
+   "name": "48-h contact missed (one reason only)",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "delivered_on": "d:-5"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "pnc_day2_missed"
+    ],
+    "not": [
+     "pnc_day3_missed"
+    ]
+   }
+  },
+  {
+   "name": "contacts attended",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "delivered_on": "d:-5"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -1,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "EPDS/PHQ >= 10",
+   "params": {},
+   "obs": [
+    [
+     "phq9",
+     -1,
+     11
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "delivered_on": "d:-5"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -1,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "postnatal_mood"
+    ]
+   }
+  },
+  {
+   "name": "danger sign: urgent + card",
+   "params": {},
+   "obs": [
+    [
+     "symptoms",
+     0,
+     null,
+     null,
+     "danger"
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "delivered_on": "d:-5"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -1,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "postnatal_danger"
+    ],
+    "card": "postnatal_danger",
+    "props": [
+     "call_patient_now"
+    ]
+   }
+  }
+ ]
+}

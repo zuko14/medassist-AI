@@ -1,0 +1,5 @@
+Item Code,Item Name,Item Type,Unit Rate,HSN/SAC,Tax %
+CONS_GEN,General consultation,Consult,"₹500.00",999312,0
+ECG,ECG 12 lead,Diagnostic,350,999316,0
+XRAY CHEST,X-ray chest PA,Imaging,"1,200",999316,18
+BAD,,Lab,-5,12,7

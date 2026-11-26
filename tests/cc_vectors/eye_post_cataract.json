@@ -1,0 +1,72 @@
+{
+ "pack": "eye_post_cataract",
+ "cases": [
+  {
+   "name": "day-1 visit missed",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "surgery_on": "d:-3"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "visit_day1_missed"
+    ],
+    "not": [
+     "visit_week1_missed"
+    ]
+   }
+  },
+  {
+   "name": "day-1 visit done",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "surgery_on": "d:-3"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -2,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "danger symptom urgent + card",
+   "params": {},
+   "obs": [
+    [
+     "symptoms",
+     0,
+     null,
+     null,
+     "danger"
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "surgery_on": "d:-1"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "eye_danger"
+    ],
+    "card": "eye_post_op_danger"
+   }
+  }
+ ]
+}

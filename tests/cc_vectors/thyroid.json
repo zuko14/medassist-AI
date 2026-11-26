@@ -1,0 +1,170 @@
+{
+ "pack": "thyroid",
+ "cases": [
+  {
+   "name": "TSH in range this year",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "tsh",
+     -100,
+     2.1,
+     "normal"
+    ]
+   ],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "no TSH: routine overdue",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "has": [
+     "tsh_overdue"
+    ]
+   }
+  },
+  {
+   "name": "TSH 366 d ago overdue",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "tsh",
+     -366,
+     2.1,
+     "normal"
+    ]
+   ],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "tsh_overdue"
+    ]
+   }
+  },
+  {
+   "name": "dose changed 50 d ago, no TSH since",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "tsh",
+     -100,
+     2.1,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "levothyroxine_changed_on": "d:-50"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "tsh_after_change"
+    ]
+   }
+  },
+  {
+   "name": "dose changed 48 d ago: not yet",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "tsh",
+     -100,
+     2.1,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "levothyroxine_changed_on": "d:-48"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "tsh_after_change"
+    ]
+   }
+  },
+  {
+   "name": "TSH done after change",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "tsh",
+     -10,
+     2.1,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "levothyroxine_changed_on": "d:-60"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "tsh_after_change"
+    ]
+   }
+  },
+  {
+   "name": "TSH flagged high",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "tsh",
+     -10,
+     9.5,
+     "high"
+    ]
+   ],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "tsh_out_of_range"
+    ],
+    "props": [
+     "book_review_visit"
+    ]
+   }
+  }
+ ]
+}

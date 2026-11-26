@@ -61,6 +61,9 @@ from app.services.tenant import (
     ipd_access,
     dx_access,
     rx_access,
+    ri_access,
+    mi_access,
+    care_access,
     opd_enabled,
     require_feature,
     specialty_enabled,
@@ -83,6 +86,10 @@ from app.services.permissions import (
     RX_PERMISSIONS,
     enforce_branch_scope,
     holds_rx_permission,
+    holds_ri_permission,
+    RI_PERMISSIONS,
+    holds_cc_permission,
+    CC_PERMISSIONS,
     require_permission,
     resolve_owned_branch,
 )
@@ -606,6 +613,14 @@ def _enforce_opd_role_scope(request: Request, user: AdminUser) -> AdminUser:
     return user
 
 
+def _sp_me(clinic: dict, user) -> dict:
+    from app.services.permissions import holds_sp_permission
+    from app.services.tenant import SP_PACKS, sp_access
+    on = sp_access(clinic)
+    return {"sp_access": on, "sp_packs": [p for p in SP_PACKS if on and sp_access(clinic, p)],
+            "sp_perms": [p for p in ("SP_CLINICAL", "SP_DESK", "SP_ADMIN") if on and holds_sp_permission(user, p)]}
+
+
 async def verify_credentials(
     request: Request,
     credentials: Optional[HTTPBasicCredentials] = Depends(security),
@@ -949,6 +964,16 @@ async def get_current_admin(
             "rx_state": None,
             "rx_store_ids": None,
             "rx_perms": [],
+            "ri_access": False,
+            "ri_perms": [],
+            "mi_access": False,
+            "cc_access": None,
+            "cc_state": None,
+            "cc_perms": [],
+            "cc_is_doctor_signer": False,
+            "sp_access": False,
+            "sp_packs": [],
+            "sp_perms": [],
         }
 
     clinic = await get_clinic_by_id(scoped_clinic_id)
@@ -1012,6 +1037,18 @@ async def get_current_admin(
         "rx_state": clinic.get("rx_state"),
         "rx_store_ids": rx_store_ids,
         "rx_perms": rx_perms,
+        # Revenue Guard (migration 143): owner opt-in; the page shows for RI_VIEW holders
+        "ri_access": ri_access(clinic),
+        "ri_perms": [p for p in RI_PERMISSIONS if holds_ri_permission(user, p)] if ri_access(clinic) else [],
+        # Data import / Switch to Kriya (migration 144): owner opt-in; the wizard shows for DATA_IMPORT holders
+        "mi_access": mi_access(clinic),
+        # Continuous Care (migration 145): 'ACTIVE', 'WIND_DOWN' (no new enrolments or cards) or None
+        "cc_access": care_access(clinic),
+        "cc_state": clinic.get("cc_state"),
+        "cc_perms": [p for p in CC_PERMISSIONS if holds_cc_permission(user, p)] if care_access(clinic) else [],
+        "cc_is_doctor_signer": bool(care_access(clinic) and holds_cc_permission(user, "CC_APPROVE")),
+        # Specialty OS (migrations 151–155): owner opt-in; packs on for this clinic; SP_* actions this login holds
+        **_sp_me(clinic, user),
         # migration 082. The Treatments page files rows under these sections
         # (Child Care / Women Care / Fertility Care) -- from here, so the panel
         # never keeps its own copy of the registry.

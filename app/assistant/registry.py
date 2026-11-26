@@ -24,6 +24,9 @@ from app.services.permissions import (
     holds_services_permission,
     holds_ot_permission,
     holds_rx_permission,
+    holds_ri_permission,
+    holds_cc_permission,
+    holds_sp_permission,
 )
 from app.services.tenant import (
     corporate_health_enabled,
@@ -34,6 +37,9 @@ from app.services.tenant import (
     ipd_access,
     opd_enabled,
     rx_access,
+    ri_access,
+    care_access,
+    sp_access,
     specialty_enabled,
 )
 from app.voice.dates import today_ist
@@ -94,6 +100,21 @@ PAGES: dict[str, str] = {
     "rxregisters": "Drug Registers",   # Pharmacy OS statutory H/H1/X/narcotic registers (migration 141); page hand-off only
     "rxrefills": "Refills & Alerts",   # Pharmacy OS refill requests, stock / integrity alerts, expiry returns (142); page hand-off only
     "rxdash": "Pharmacy Dashboard",   # Pharmacy OS KPIs + lost-sale call list (P9); rx.today_summary reads it
+    "riguard": "Revenue Guard",   # Revenue Guard (migration 143); ri.yesterday reads it
+    "miwizard": "Switch to Kriya",   # Data import wizard (migration 144); page hand-off only
+    "ccradar": "Care radar",          # Continuous Care (migrations 145–149); cc.radar_today reads it
+    "ccqueue": "Care queue",          # cc.urgent_cases reads it
+    "ccinbox": "Doctor inbox",        # cc.inbox_count reads it
+    "ccpatients": "Patients in care",  # cc.patient_status hands off to it
+    "ccoutcomes": "Care outcomes",    # cc.outcomes_month reads it
+    "ccprotocols": "Care protocols",  # page hand-off only (doctors sign there)
+    "ccsetup": "Care setup",          # page hand-off only
+    "speye": "Eye exam & optical",    # Specialty OS (migrations 151–155); sp.optical_ready reads it
+    "spdental": "Dental chart & lab",  # page hand-off only
+    "spivf": "IVF cycles",            # page hand-off only (witnessing needs a second login)
+    "spderma": "Derma records",       # page hand-off only
+    "spwc": "Antenatal & vaccines",   # page hand-off only
+    "spshared": "Packages, photos & camps",  # sp.instalments_due / sp.licences_due read it
     "dxinstruments": "Instruments & QC",   # Diagnostic OS analyser bridge and QC (migration 133); page hand-off only
     "insurance": "Insurance / TPA",
     "tariffs": "Service Catalogue",
@@ -156,6 +177,21 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
                 "variance report"),
     "rxregisters": ("drug registers", "schedule h1 register", "narcotic register", "schedule x register",
                     "drug inspector", "batch recall", "recall trace"),
+    "riguard": ("revenue guard", "unbilled charges", "billing leakage"),
+    "ccradar": ("care radar", "follow up radar", "overdue patients list"),
+    "ccqueue": ("care queue", "coordinator queue", "care cases"),
+    "ccinbox": ("doctor inbox", "care approvals"),
+    "ccpatients": ("patients in care", "care patients", "enrolled patients"),
+    "ccoutcomes": ("care outcomes", "care programme report"),
+    "ccprotocols": ("care protocols", "protocol packs"),
+    "ccsetup": ("care setup", "continuous care setup"),
+    "speye": ("eye exam", "optical job board", "spectacle orders", "optical orders"),
+    "spdental": ("odontogram", "dental chart", "dental lab orders", "tooth chart"),
+    "spivf": ("ivf cycles", "stimulation chart", "embryology", "trigger time"),
+    "spderma": ("derma records", "procedure session record", "pasi score", "scorad score", "laser session record"),
+    "spwc": ("antenatal", "anc timeline", "vaccine schedule", "immunisation schedule", "immunization schedule"),
+    "spshared": ("session packages", "clinical photos", "before after photos", "estimates", "health camps"),
+    "miwizard": ("switch to kriya", "data import", "import from old software", "migrate data", "import doctors"),
     "rxdash": ("pharmacy dashboard", "pharmacy kpis", "lost sales", "lost sale list", "pending balance call list"),
     "rxrefills": ("refill requests", "medicine refills", "refill reminders", "pharmacy alerts", "low stock alerts",
                   "expiry returns", "return to supplier planner"),
@@ -1640,6 +1676,100 @@ _RX_DASH = (("Sales today", "sales_today_paise", "paise"), ("Bills", "sales_coun
             ("Expired batches on shelf", "expired_on_hand_count", "text"), ("Open alerts", "unack_alerts_count", "text"),
             ("Registers intact", "register_chain_status.ok", "yesno"), ("Gross margin", "gross_margin_paise", "paise"))
 
+# ── Revenue Guard (migration 143; docs/revenue-integrity/SPEC.md §7) ── read-only; Ketu never bills.
+_RI_YESTERDAY = (("Not billed yesterday", "yesterday_leakage_paise", "paise"),
+                 ("Items not billed yesterday", "yesterday_leakage_count", "text"),
+                 ("Open over 7 days", "open_over_7d_paise", "paise"),
+                 ("Recovered this month", "recovered_paise", "paise"),
+                 ("Dismissed this month", "dismissed_paise", "paise"),
+                 ("Integrity issues open", "integrity_open", "text"))
+
+# ── Continuous Care (docs/continuous-care/KRIYA-KETU.md §1) ── R0 reads of the same /admin/cc routes the pages use;
+# anything that changes care data is a page hand-off (H1). No CC data reaches an LLM from these reads.
+def _cc(perm: str) -> dict:
+    return dict(permission=perm, perm_source=_HANDLER, feature=care_access, holds=lambda u: holds_cc_permission(u, perm))
+
+
+_CC_CASE_COLS = (("Patient", "patient_name", "text"), ("Tier", "tier", "label"), ("Why", "reason", "label"),
+                 ("Due", "due_by", "time"))
+_CC_OUT = (("Active", "funnel.active", "text"), ("Return rate %", "return_rate", "text"),
+           ("Baseline return rate %", "baseline_return_rate", "text"), ("Labs on time %", "labs_on_time", "text"),
+           ("Visits verified", "visits_verified", "text"), ("Verified revenue", "revenue_paise", "paise"),
+           ("Method", "method_version", "text"))
+
+CC_ACTIONS = (
+    _read("cc.radar_today", "Who is overdue for follow-up today", "/admin/cc/radar", "ccradar",
+          ("who is overdue today", "overdue follow ups", "follow up chhoot gaya", "follow-up se chhoot gaya",
+           "aaj kaun follow up se chhoot gaya", "follow up miss ayyaru", "फॉलो-अप छूट गया", "ఫాలో అప్ మిస్"),
+          lambda d, p: present.table("On the care radar", "ccradar", (
+              ("Patient", "patient_name", "text"), ("Why", "label", "text"), ("Score", "score", "text")),
+              _rows(d, "rows")), unless=("not replied", "not responding", "not answered"), **_cc("CC_VIEW")),
+    _read("cc.urgent_cases", "Urgent care cases", "/admin/cc/cases", "ccqueue",
+          ("urgent care cases", "any urgent care cases", "urgent cases in care", "care urgent", "urgent care case kitne",
+           "urgent care cases enni", "अर्जेंट केयर केस", "అర్జెంట్ కేర్ కేసులు"),
+          lambda d, p: present.table("Urgent care cases", "ccqueue", _CC_CASE_COLS, _rows(d, "cases")),
+          query=lambda p: {"tier": "urgent"}, **_cc("CC_VIEW")),
+    _read("cc.inbox_count", "How many patients need my approval", "/admin/cc/inbox", "ccinbox",
+          ("need my approval", "waiting for my approval", "my care approvals", "meri approval kitne",
+           "naa approval kosam", "मेरी मंज़ूरी", "నా ఆమోదం కోసం"),
+          lambda d, p: present.table("Waiting for your decision", "ccinbox", _CC_CASE_COLS, _rows(d, "cases")),
+          **_cc("CC_APPROVE")),
+    _read("cc.outcomes_month", "Care programme results this month", "/admin/cc/outcomes", "ccoutcomes",
+          ("care programme results", "care results this month", "care outcomes this month", "care ka result",
+           "care phalitalu", "केयर परिणाम", "కేర్ ఫలితాలు"),
+          lambda d, p: present.metrics("Care programme this month", "ccoutcomes", d, _CC_OUT), **_cc("CC_VIEW")),
+    _read("cc.not_responding", "Who has not replied to care messages", "/admin/cc/radar", "ccradar",
+          ("not replied to care", "not responding to care", "care messages not answered", "care reply nahi",
+           "care ki reply nahi aayi", "care ki reply raledu", "जवाब नहीं दिया", "జవాబు ఇవ్వలేదు"),
+          lambda d, p: present.table("Not responding", "ccradar", (
+              ("Patient", "patient_name", "text"), ("Unanswered", "detail.unanswered", "text")), _rows(d, "rows")),
+          query=lambda p: {"reason": "not_responding"}, **_cc("CC_VIEW")),
+    _h("cc.patient_status", "A patient's care status", "ccpatients", "",
+       ("care status of", "sugar this week", "care status", "readings this week"),
+       "Open Patients in care and press Timeline on the patient's row.", feature=care_access),
+    _h("cc.enroll", "Enroll a patient in care", "ccpatients", "",
+       ("enroll+care", "enrol+care", "care+enroll", "diabetes care+enroll"),
+       "Open Patients in care and press Enroll a patient; the doctor signs the enrollment.", feature=care_access),
+)
+
+# ── Specialty OS (migrations 151–155) ── R0 reads of the same /admin/sp routes the pages use; anything that changes a
+# clinical record (forms, embryology, doses) is done on the page. No clinical data reaches an LLM from these reads.
+def _sp(perm: str, pack: Optional[str] = None) -> dict:
+    return dict(permission=perm, perm_source=_HANDLER, holds=lambda u: holds_sp_permission(u, perm),
+                feature=(lambda c: sp_access(c, pack)) if pack else sp_access)
+
+
+SP_ACTIONS = (
+    _read("sp.optical_ready", "Which spectacles are ready to collect", "/admin/sp/optical/board", "speye",
+          ("spectacles ready", "glasses ready to collect", "optical orders ready", "chashma ready", "kalla jodu ready",
+           "चश्मा तैयार", "కళ్లజోడు సిద్ధం"),
+          lambda d, p: present.table("Spectacles ready", "speye", (
+              ("Patient", "patient_name", "text"), ("Lens", "lens_desc", "text"), ("Balance", "balance_paise", "paise")),
+              ((d or {}).get("columns") or {}).get("ready") or [] if isinstance(d, dict) else []), **_sp("SP_DESK", "eye")),
+    _read("sp.instalments_due", "Instalments due this week", "/admin/sp/instalments/due", "spshared",
+          ("instalments due", "installments due this week", "emi due this week", "kisht baaki", "vaayidalu baaki",
+           "किश्त बाकी", "వాయిదాలు బాకీ"),
+          lambda d, p: present.table("Instalments due", "spshared", (
+              ("Due", "due_on", "text"), ("Amount", "outstanding_paise", "paise"), ("Status", "status", "label")),
+              _rows(d, "instalments")), **_sp("SP_DESK")),
+    _read("sp.licences_due", "Licences due for renewal", "/admin/sp/compliance", "spshared",
+          ("licence renewal", "licences expiring", "license renewal due", "aerb renewal", "licence ka renewal",
+           "लाइसेंस नवीनीकरण", "లైసెన్స్ రెన్యూవల్"),
+          lambda d, p: present.table("Licences", "spshared", (
+              ("Licence", "label", "text"), ("Valid until", "valid_until", "text"), ("State", "state", "label")),
+              [r for r in _rows(d, "items") or [] if isinstance(r, dict) and r.get("state") != "valid"]),
+          **_sp("SP_DESK")),
+)
+
+RI_ACTIONS = (
+    _read("ri.yesterday", "What was done but not billed yesterday", "/admin/ri/summary", "riguard",
+          ("not billed yesterday", "unbilled yesterday", "revenue leakage", "bill nahi hua", "bill kaala",
+           "బిల్ చేయలేదు", "बिल नहीं हुआ"),
+          lambda d, p: present.metrics("Revenue Guard", "riguard", d, _RI_YESTERDAY),
+          permission="RI_VIEW", perm_source=_HANDLER, feature=ri_access,
+          holds=lambda u: holds_ri_permission(u, "RI_VIEW")),
+)
+
 RX_ACTIONS = (
     _read("rx.stock_lookup", "Is a medicine in stock", "/admin/rx/stock/answer", "rxstock",
           ("in stock", "stock hai", "stock mein", "stock lo", "stock undha", "available in pharmacy", "hai kya",
@@ -2260,6 +2390,9 @@ REGISTRY: dict[str, ActionSpec] = _build(
     *HOSPITAL_ACTIONS,
     *DX_ACTIONS,
     *RX_ACTIONS,
+    *RI_ACTIONS,
+    *CC_ACTIONS,
+    *SP_ACTIONS,
     *OT_ACTIONS,
     *VOICE_ENTRY_3,
     *VOICE_ENTRY_4,

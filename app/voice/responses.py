@@ -34,6 +34,32 @@ T: dict = {
         "en": "Namaste, this is {assistant} calling from {hospital}. This is a reminder that {whose}an appointment {what} {date} at {time}. Please be on time, and if you can, come ten minutes early. Will you be able to come?",
         "hi": "नमस्ते, मैं {hospital} से {assistant} बोल रही हूँ। {whose}{date} {time} बजे {what} अपॉइंटमेंट है। यही याद दिलाने के लिए फ़ोन किया है। कृपया समय पर, हो सके तो दस मिनट पहले आइए। क्या आप आ पाएँगे?",
     },
+    # Continuous Care check-in (ADR-CC-16; app/services/cc_voice.py). Automated assistant said first; numbers read back.
+    "greeting_care": {
+        "te": "నమస్కారం, నేను {hospital} కేర్ బృందం నుండి ఆటోమేటెడ్ అసిస్టెంట్ {assistant} మాట్లాడుతున్నాను. నేను {name} గారితో మాట్లాడుతున్నానా?",
+        "en": "Namaste, this is {assistant}, the automated care assistant of {hospital}. Am I speaking with {name}?",
+        "hi": "नमस्ते, मैं {hospital} की केयर टीम की ऑटोमेटेड असिस्टेंट {assistant} बोल रही हूँ। क्या मेरी बात {name} जी से हो रही है?",
+    },
+    "care_ask_identity": {"te": "మీరు {name} గారేనా అండి?", "en": "Am I speaking with {name}?",
+                          "hi": "क्या आप {name} जी हैं?"},
+    "care_wrong_person": {"te": "క్షమించండి, ఇబ్బందికి. ధన్యవాదాలు.", "en": "Sorry to trouble you. Thank you.",
+                          "hi": "माफ़ कीजिए, परेशानी के लिए। धन्यवाद।"},
+    # {when} is "morning" / "afternoon" / "evening" — not {time}, which realize() reads as HH:MM
+    "care_ask_adherence": {"te": "ఈరోజు {when} మందులు వేసుకున్నారా? అవును లేదా లేదు చెప్పండి.",
+                           "en": "Did you take your {when} medicines today? Please say yes or no.",
+                           "hi": "क्या आपने आज {when} की दवाइयाँ ली? हाँ या नहीं बताइए।"},
+    "care_ask_reading": {"te": "దయచేసి మీ {measure} రీడింగ్ చెప్పండి.", "en": "Please tell me your {measure} reading.",
+                         "hi": "कृपया अपनी {measure} रीडिंग बताइए।"},
+    "care_readback": {"te": "నేను విన్నది {number}. సరైనదేనా?", "en": "I heard {number}. Is that correct?",
+                      "hi": "मैंने सुना {number}। क्या यह सही है?"},
+    "care_hypo_now": {
+        "te": "మీ షుగర్ తక్కువగా ఉంది. ఇప్పుడే మూడు చెంచాల చక్కెర నీటిలో కలిపి తాగండి. పదిహేను నిమిషాల తర్వాత మళ్లీ చూడండి. గందరగోళం లేదా స్పృహ తప్పినట్లు ఉంటే వెంటనే అత్యవసర నంబర్‌కు ఫోన్ చేయండి.",
+        "en": "Your sugar is low. Please take three teaspoons of sugar in water now, and check again in fifteen minutes. If you feel confused or faint, call the emergency number at once.",
+        "hi": "आपकी शुगर कम है। अभी तीन चम्मच चीनी पानी में घोलकर पीजिए और पंद्रह मिनट बाद फिर जाँचिए। उलझन या बेहोशी लगे तो तुरंत आपातकालीन नंबर पर फ़ोन कीजिए।",
+    },
+    "care_thanks": {"te": "ధన్యవాదాలు. మీ సమాధానాలు మీ కేర్ బృందానికి చేరాయి.",
+                    "en": "Thank you. Your answers are with your care team.",
+                    "hi": "धन्यवाद। आपके जवाब आपकी केयर टीम तक पहुँच गए हैं।"},
     "reminder_whose_named": {"te": "{patient} గారికి", "en": "{patient} has", "hi": "{patient} जी का"},
     "reminder_whose_you": {"te": "మీకు", "en": "you have", "hi": "आपका"},
     "reminder_ask_coming": {
@@ -520,6 +546,12 @@ T: dict = {
         "te": "నేనే మీకు టెస్ట్ బుక్ చేయగలను, టెస్ట్ ధరలు, రిపోర్ట్స్, టైమింగ్స్ కూడా చెప్పగలను. ఏం కావాలో చెప్పండి. లేదా రిసెప్షన్‌కి కనెక్ట్ చేయమంటారా?",
         "en": "I can book your test myself, and help with test prices, reports and timings. Tell me what you need, or shall I connect you to reception?",
         "hi": "मैं खुद आपका टेस्ट बुक कर सकती हूँ, और टेस्ट की कीमत, रिपोर्ट, टाइमिंग की जानकारी भी दे सकती हूँ। बताइए क्या चाहिए, या रिसेप्शन से जोड़ दूँ?",
+    },
+    # Standalone pharmacy (plan `pharmacy`, migration 150): no doctor or test bookings are ever offered
+    "help_menu_pharmacy": {
+        "te": "క్షమించండి, లైన్ సరిగ్గా వినపడటం లేదు. నేను మీ మందుల రీఫిల్ అభ్యర్థన తీసుకోగలను, మా టైమింగ్స్, అడ్రస్ చెప్పగలను, లేదా ఫార్మసిస్ట్‌కు కలపగలను. ఏం కావాలో ఒక్క మాటలో చెప్పండి.",
+        "en": "Sorry, the line isn't very clear. I can take a refill request for your medicines, tell you our timings and address, or connect you to the pharmacist. Just tell me in a few words what you need.",
+        "hi": "माफ़ कीजिए, आवाज़ साफ़ नहीं आ रही। मैं आपकी दवा के रीफ़िल का अनुरोध ले सकती हूँ, हमारी टाइमिंग और पता बता सकती हूँ, या फ़ार्मासिस्ट से जोड़ सकती हूँ। बस थोड़े शब्दों में बताइए क्या चाहिए।",
     },
     "help_menu_lab": {
         "te": "క్షమించండి, లైన్ సరిగ్గా వినపడటం లేదు. నేను టెస్ట్ బుక్ చేయగలను, టెస్ట్ ధరలు, టైమింగ్స్, అడ్రస్ చెప్పగలను, మీ రిపోర్ట్ కూడా చూడగలను. ఏం కావాలో ఒక్క మాటలో చెప్పండి.",

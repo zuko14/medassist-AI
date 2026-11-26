@@ -12,6 +12,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection, opd, ipd, orders, lis, documents, masters, emergency, ot, radiology, insurance, dx, dx_public, dx_bridge, rx
+from app.routers import revenue_guard as ri_router
+from app.routers import data_import as mi_router
+from app.routers import cc as cc_router
+from app.routers import rx_retail as rxr_router
+from app.routers import sp as sp_router
 from app.routers import voice_admin, voice_platform, assistant
 from app.voice import gateway as voice_gateway
 from app.routers.integrations import router as integrations_router
@@ -417,6 +422,14 @@ app.include_router(dx_bridge.router)    # DX-60: bridge agents, instruments, ins
 app.include_router(dx_bridge.internal)  # DX-60: /internal/dx/bridge/* (lab bridge, HMAC; outbound from the lab)
 # Pharmacy OS (migration 134): every route gated by rx_access(clinic)
 app.include_router(rx.router)
+# Revenue Guard (migration 143): every route gated by ri_access(clinic)
+app.include_router(ri_router.router)
+# Data import / Switch to Kriya (migration 144): every route gated by mi_access(clinic)
+app.include_router(mi_router.router)
+# Continuous Care (migrations 145–149): every route gated by care_access(clinic)
+app.include_router(cc_router.router)
+app.include_router(rxr_router.router)
+app.include_router(sp_router.router)
 
 
 @app.get("/")

@@ -1,0 +1,296 @@
+{
+ "pack": "phq9",
+ "cases": [
+  {
+   "name": "improving, answered recently",
+   "params": {},
+   "obs": [
+    [
+     "phq9",
+     -2,
+     4,
+     null,
+     "q9=0"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "phq9": 12
+   },
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "item 9 >= 1 urgent whatever the total",
+   "params": {},
+   "obs": [
+    [
+     "phq9",
+     0,
+     5,
+     null,
+     "q9=1"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "phq9": 6
+   },
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "self_harm"
+    ],
+    "card": "crisis_support",
+    "props": [
+     "call_patient_now"
+    ]
+   }
+  },
+  {
+   "name": "only the latest answer counts for item 9",
+   "params": {},
+   "obs": [
+    [
+     "phq9",
+     -1,
+     5,
+     null,
+     "q9=0"
+    ],
+    [
+     "phq9",
+     -15,
+     6,
+     null,
+     "q9=2"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "phq9": 6
+   },
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "self_harm"
+    ]
+   }
+  },
+  {
+   "name": "total 20 severe urgent",
+   "params": {},
+   "obs": [
+    [
+     "phq9",
+     -1,
+     20,
+     null,
+     "q9=0"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "phq9": 19
+   },
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "severe"
+    ]
+   }
+  },
+  {
+   "name": "total 19 not severe",
+   "params": {},
+   "obs": [
+    [
+     "phq9",
+     -1,
+     19,
+     null,
+     "q9=0"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "phq9": 19
+   },
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "severe"
+    ]
+   }
+  },
+  {
+   "name": "worse by 5 from baseline",
+   "params": {},
+   "obs": [
+    [
+     "phq9",
+     -1,
+     13,
+     null,
+     "q9=0"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "phq9": 8
+   },
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "worsening"
+    ]
+   }
+  },
+  {
+   "name": "worse by 4 does not fire",
+   "params": {},
+   "obs": [
+    [
+     "phq9",
+     -1,
+     12,
+     null,
+     "q9=0"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "phq9": 8
+   },
+   "enrolled": -20,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "worsening"
+    ]
+   }
+  },
+  {
+   "name": "not improving at 8 weeks",
+   "params": {},
+   "obs": [
+    [
+     "phq9",
+     -1,
+     14,
+     null,
+     "q9=0"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "phq9": 12
+   },
+   "enrolled": -60,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "not_improving"
+    ]
+   }
+  },
+  {
+   "name": "not improving needs 8 weeks",
+   "params": {},
+   "obs": [
+    [
+     "phq9",
+     -1,
+     14,
+     null,
+     "q9=0"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "phq9": 12
+   },
+   "enrolled": -50,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "not_improving"
+    ]
+   }
+  },
+  {
+   "name": "due after 14 days (routine)",
+   "params": {},
+   "obs": [
+    [
+     "phq9",
+     -15,
+     4,
+     null,
+     "q9=0"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "phq9": 6
+   },
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "has": [
+     "due"
+    ]
+   }
+  },
+  {
+   "name": "never answered: due",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "due"
+    ]
+   }
+  }
+ ]
+}

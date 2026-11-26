@@ -1,0 +1,41 @@
+{
+ "pack": "eye_dr_screen",
+ "cases": [
+  {
+   "name": "fundus 366 d ago: routine",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "last_fundus_on": "d:-366"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "has": [
+     "fundus_due"
+    ]
+   }
+  },
+  {
+   "name": "fundus recent",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "last_fundus_on": "d:-100"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  }
+ ]
+}

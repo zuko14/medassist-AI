@@ -148,6 +148,23 @@ PERMISSIONS = frozenset({
     "RX_CATALOGUE",
     "RX_CONTROLLED",
     "RX_ADMIN",
+    # ── Revenue Guard (migration 143) ── routes also require ri_access(clinic).
+    "RI_VIEW",
+    "RI_RESOLVE",
+    # ── Data import (migration 144) ── clinic admin by default; routes also require mi_access(clinic).
+    "DATA_IMPORT",
+    # ── Continuous Care (migrations 145–149) ── routes also require care_access(clinic).
+    # docs/continuous-care/SECURITY.md §2. CC_APPROVE is effective only for a doctor login whose doctor row has a
+    # registration number (checked where it is used); super-admin can never sign.
+    "CC_VIEW",
+    "CC_COORDINATE",
+    "CC_APPROVE",
+    "CC_ADMIN",
+    # ── Specialty OS (migrations 151–155) ── routes also require sp_access(clinic[, pack]). OPD duties confer them
+    # too (holds_sp_permission); a grant here lets a clinic admin delegate one SP duty without the OPD one.
+    "SP_CLINICAL",
+    "SP_DESK",
+    "SP_ADMIN",
 })
 
 #: A login for a lab's CORPORATE client: sees that one company's aggregate
@@ -188,6 +205,8 @@ STAFF_ROLES = frozenset({
     # ── Pharmacy OS ── (docs/pharmacy-os/SECURITY.md §3)
     "PHARMACIST",
     "PHARMACY_MANAGER",
+    # ── Continuous Care ── (docs/continuous-care/SECURITY.md §2): nurse / counsellor / health coach
+    "CARE_COORDINATOR",
     "STORE_KEEPER",
 })
 
@@ -247,6 +266,8 @@ ROLE_PRESETS: dict[str, list[str]] = {
                          "RX_REGISTERS", "RX_REFILLS", "RX_REPORTS", "RX_STORE_MANAGE", "RX_CATALOGUE",
                          "RX_CONTROLLED", "RX_ADMIN"],
     "STORE_KEEPER": ["RX_READ", "RX_PURCHASE", "RX_ADJUST", "RX_TRANSFER", "RX_AUDIT"],
+    # ── Continuous Care ──
+    "CARE_COORDINATOR": ["CC_VIEW", "CC_COORDINATE"],
 }
 
 #: Logins created before migration 115 hold only their module grants. Each
@@ -459,6 +480,71 @@ def holds_rx_permission(user: "AdminUser", perm: str) -> bool:
     return getattr(user, "staff_role", None) in _RX_GRANTS_IMPLIED_BY_ROLE.get(perm, ())
 
 
+# ── Revenue Guard ──────────────────────────────────────────────────────────
+#: docs/revenue-integrity/SPEC.md §6. Deliberately NOT in role_implied_grants(): that would newly refuse a staff
+#: granter creating a CASHIER / BRANCH_MANAGER login on clinics that never enabled Revenue Guard.
+_RI_GRANTS_IMPLIED_BY_ROLE: dict[str, tuple[str, ...]] = {
+    "RI_VIEW": ("CASHIER", "BRANCH_MANAGER"),
+    "RI_RESOLVE": ("BRANCH_MANAGER",),
+}
+RI_PERMISSIONS = tuple(sorted(_RI_GRANTS_IMPLIED_BY_ROLE))
+
+
+def holds_ri_permission(user: "AdminUser", perm: str) -> bool:
+    """True if `user` may perform the Revenue Guard action `perm` (RI_VIEW / RI_RESOLVE)."""
+    if user.role in ("super_admin", "clinic_admin"):
+        return True
+    if perm in (user.permissions or []):
+        return True
+    return getattr(user, "staff_role", None) in _RI_GRANTS_IMPLIED_BY_ROLE.get(perm, ())
+
+
+# ── Continuous Care ────────────────────────────────────────────────────────
+#: What a role confers by itself while care_access(clinic) (SECURITY.md §2). Inert without the module: every
+#: /admin/cc route checks the module first. Only CARE_COORDINATOR (a role new with CC) enters role_implied_grants;
+#: DOCTOR / NURSE implications stay out of it so staff granters are capped exactly as before migration 145.
+_CC_GRANTS_IMPLIED_BY_ROLE: dict[str, tuple[str, ...]] = {
+    "CC_VIEW": ("DOCTOR", "CARE_COORDINATOR", "NURSE"),
+    "CC_COORDINATE": ("CARE_COORDINATOR",),
+    "CC_APPROVE": ("DOCTOR",),
+}
+CC_PERMISSIONS = ("CC_ADMIN", "CC_APPROVE", "CC_COORDINATE", "CC_VIEW")
+
+
+def holds_cc_permission(user: "AdminUser", perm: str) -> bool:
+    """True if `user` may perform the Continuous Care action `perm`. CC_APPROVE additionally needs a doctor login
+    (user.doctor_id) — clinic admins and super-admins coordinate and administer, but never sign or approve
+    clinical actions (no registration number)."""
+    if perm == "CC_APPROVE":
+        return bool(getattr(user, "doctor_id", None)) and (
+            perm in (user.permissions or []) or getattr(user, "staff_role", None) in _CC_GRANTS_IMPLIED_BY_ROLE[perm]
+            or user.role == "clinic_admin")
+    if user.role in ("super_admin", "clinic_admin"):
+        return True
+    if perm in (user.permissions or []):
+        return True
+    return getattr(user, "staff_role", None) in _CC_GRANTS_IMPLIED_BY_ROLE.get(perm, ())
+
+
+# ── Specialty OS (migrations 151–155) ──────────────────────────────────────
+#: SP actions reuse the OPD duties (no new staff role): a role or an OPD grant confers the SP action, inert unless the
+#: clinic has sp_access (every /admin/sp route checks the module first). Kept out of role_implied_grants.
+_SP_GRANTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "SP_CLINICAL": (("DOCTOR", "NURSE"), ("OPD_CLINICAL",)),                          # forms, photos, imaging, IVF lab
+    # desk logins get it from their preset's OPD_FRONT_DESK / OPD_BILLING grant (ROLE_PRESETS), not from the role name
+    "SP_DESK": (("NURSE", "DOCTOR"), ("OPD_FRONT_DESK", "OPD_BILLING")),               # packages, estimates
+    "SP_ADMIN": ((), ("OPD_ADMIN",)),                                                  # catalogue, compliance, camps setup
+}
+
+
+def holds_sp_permission(user: "AdminUser", perm: str) -> bool:
+    if user.role in ("super_admin", "clinic_admin"):
+        return True
+    roles, grants = _SP_GRANTS.get(perm, ((), ()))
+    return (perm in (user.permissions or []) or any(g in (user.permissions or []) for g in grants)
+            or getattr(user, "staff_role", None) in roles)
+
+
 def allowed_store_ids(user: "AdminUser", stores: list[dict]) -> Optional[set[str]]:
     """Store scope (SECURITY.md §3.3): None = every store of the clinic (admins and
     tenant-wide staff); a branch-pinned login reaches only its branch's stores."""
@@ -491,6 +577,7 @@ def role_implied_grants(staff_role: Optional[str]) -> set[str]:
                               _RADIOLOGY_GRANTS_IMPLIED_BY_ROLE, _INSURANCE_GRANTS_IMPLIED_BY_ROLE,
                               _DX_GRANTS_IMPLIED_BY_ROLE, _RX_GRANTS_IMPLIED_BY_ROLE)
            for perm, roles in table.items() if staff_role in roles}
+    out |= {"CC_VIEW", "CC_COORDINATE"} if staff_role == "CARE_COORDINATOR" else set()
     return out | ({"BILLING_CREDIT_NOTE"} if staff_role == "CASHIER" else set())
 
 
@@ -502,7 +589,7 @@ def role_grants_beyond_authority(staff_role: Optional[str], granter: "AdminUser"
         return []
     holders = (("LAB_", holds_lab_permission), ("OT_", holds_ot_permission),
                ("RADIOLOGY_", holds_radiology_permission), ("INSURANCE_", holds_insurance_permission),
-               ("DX_", holds_dx_permission), ("RX_", holds_rx_permission))
+               ("DX_", holds_dx_permission), ("RX_", holds_rx_permission), ("CC_", holds_cc_permission))
 
     def held(perm: str) -> bool:
         if perm == "BILLING_CREDIT_NOTE":

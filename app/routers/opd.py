@@ -1387,7 +1387,8 @@ async def get_prescription_pdf_route(
     )
     items = items_res.data or []
 
-    pdf_bytes = render_prescription_pdf(rx, items)
+    from app.services.sp import forms_for_print
+    pdf_bytes = render_prescription_pdf(rx, items, await forms_for_print(clinic, rx.get("encounter_id")))
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

@@ -1,0 +1,41 @@
+{
+ "pack": "child_growth",
+ "cases": [
+  {
+   "name": "z below -2",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "weight_for_age_z": -2.1
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "underweight_for_age"
+    ]
+   }
+  },
+  {
+   "name": "z at -2 fine",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "weight_for_age_z": -2.0
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  }
+ ]
+}

@@ -1,0 +1,81 @@
+{
+ "pack": "gad7",
+ "cases": [
+  {
+   "name": "severe at 15 urgent",
+   "params": {},
+   "obs": [
+    [
+     "gad7",
+     -1,
+     15
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "gad7": 14
+   },
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "severe"
+    ]
+   }
+  },
+  {
+   "name": "gad7 never raises the PHQ item-9 path",
+   "params": {},
+   "obs": [
+    [
+     "gad7",
+     -1,
+     3,
+     null,
+     "q9=3"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "gad7": 4
+   },
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "self_harm"
+    ],
+    "card": null
+   }
+  },
+  {
+   "name": "worse by 5",
+   "params": {},
+   "obs": [
+    [
+     "gad7",
+     -1,
+     11
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {
+    "gad7": 6
+   },
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "worsening"
+    ]
+   }
+  }
+ ]
+}

@@ -628,6 +628,14 @@ class ConversationManager:
             )
             return
 
+        # A prescription photo is a real answer in exactly one place: a standalone pharmacy's "Send prescription"
+        # step (plan `pharmacy`, migration 150, RXR-ADR-6). Anywhere else a photo keeps the reply below.
+        if message_type == "image" and clinic.get("plan") == "pharmacy" and session.get("state") == "rx_upload_rx":
+            from app.services import rx_retail
+            await rx_retail.handle(self, clinic, phone, session.get("state"), message, message_type, interactive_data,
+                                   lang, lambda st: self.update_state(clinic, phone, st, session.get("context") or {}))
+            return
+
         if message_type not in READABLE_MESSAGE_TYPES:
             if message_type in IGNORED_MESSAGE_TYPES:
                 logger.info(
@@ -651,6 +659,16 @@ class ConversationManager:
             )
             return
         # ── End unreadable message types ──────────────────────────────────────
+
+        # ── Self-harm safety (CC-L1, app/services/crisis.py) ───────────────────
+        # From any state and before the firewall: a fixed phrase list (en/hi/te), no LLM. A match gets the crisis
+        # card and a staff alert; every other message continues exactly as before.
+        if message_type == "text" and message.strip():
+            from app.services import crisis
+            if crisis.detect(message):
+                await crisis.respond(self, clinic, phone, (patient or {}).get("language") or "en")
+                return
+        # ── End self-harm safety ───────────────────────────────────────────────
 
         # ── Clinical Firewall: Screen for medical advice requests ──────────────
         # This runs BEFORE the LLM is called. If a patient asks for medication
@@ -694,6 +712,44 @@ class ConversationManager:
             if payload.startswith((rx_refills.PREFIX_ON, rx_refills.PREFIX_OFF)):
                 if await rx_refills.handle_button(self, clinic, phone, payload):
                     return
+
+        # ── Continuous Care hook (ADR-CC-09 revised, VERIFICATION D1/D2) ──────
+        # Outside the "button" branch so template quick replies AND in-window taps reach it. Only clinics with
+        # care_access (a check on the clinic row already in memory — no DB call otherwise); claims only `cc:` taps,
+        # a strict numeric reading with an open prompt, and STOP CARE. Returns False on anything else or any error.
+        from app.services.tenant import care_access
+        if care_access(clinic):
+            from app.services import cc_hooks
+            tap_id = str((interactive_data or {}).get("id") or "") if message_type in ("button", "interactive") else ""
+            if tap_id.startswith("cc:"):
+                if await cc_hooks.handle_tap(self, clinic, phone, tap_id, message_id):
+                    return
+            elif message_type == "text" and message.strip():
+                if await cc_hooks.handle_typed(self, clinic, phone, session.get("state"), message, message_id):
+                    return
+        # ── End Continuous Care hook ──────────────────────────────────────────
+
+        # ── Specialty OS hook (migrations 152/154): estimate accept / decline, IVF trigger acknowledgement ──
+        # Only clinics with sp_access (the clinic row in memory — no DB call otherwise) and only spest: / spivf: taps.
+        from app.services.tenant import sp_access
+        if message_type in ("button", "interactive") and sp_access(clinic):
+            sp_tap = str((interactive_data or {}).get("id") or "")
+            if sp_tap.startswith(("spest:", "spivf:")):
+                from app.services import sp_hooks
+                if await sp_hooks.handle_tap(self, clinic, phone, sp_tap, message_id):
+                    return
+        # ── End Specialty OS hook ─────────────────────────────────────────────
+
+        # ── Standalone pharmacy front door (plan `pharmacy`, migration 150; RXR-ADR-5, VERIFICATION D14) ──
+        # A medical store has no doctors: its whole conversation is the pharmacy menu (refill, send prescription,
+        # stock, timings, pharmacist) and never offers a booking. A check on the clinic row in memory — every other
+        # plan continues below byte-identically. Only the Emergency tap falls through to the existing handler.
+        if clinic.get("plan") == "pharmacy":
+            from app.services import rx_retail
+            if await rx_retail.handle(self, clinic, phone, session.get("state"), message, message_type, interactive_data,
+                                      lang, lambda st: self.update_state(clinic, phone, st, session.get("context") or {})):
+                return
+        # ── End standalone pharmacy ───────────────────────────────────────────
 
         # A tap on a TEMPLATE quick-reply arrives as message_type "button" with
         # the payload we set. The health check-in's two replies must reach the

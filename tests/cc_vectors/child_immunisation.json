@@ -1,0 +1,51 @@
+{
+ "pack": "child_immunisation",
+ "cases": [
+  {
+   "name": "vaccine overdue past grace",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "due_vaccines": [
+     [
+      "Pentavalent-2",
+      "d:-8"
+     ]
+    ]
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "vaccine_overdue"
+    ]
+   }
+  },
+  {
+   "name": "within grace",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "due_vaccines": [
+     [
+      "Pentavalent-2",
+      "d:-7"
+     ]
+    ]
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  }
+ ]
+}

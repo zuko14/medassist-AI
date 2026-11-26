@@ -10,6 +10,7 @@ after every turn, so a call survives a process restart and the admin panel
 can show exactly where a conversation stands.
 """
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Optional, Protocol
 
@@ -103,7 +104,15 @@ class DialogEngine:
 
     def greeting(self, state: dict, outbound: bool = False, interest: Optional[str] = None,
                  name: Optional[str] = None, slots: Optional[dict] = None,
-                 reminder: Optional[dict] = None) -> TurnOutput:
+                 reminder: Optional[dict] = None, care: Optional[dict] = None) -> TurnOutput:
+        if care:
+            # Continuous Care check-in (ADR-CC-16): say it is the hospital's automated assistant, confirm the person,
+            # then ask only the due items; every spoken number is read back before it is stored.
+            state["care"] = {"items": list(care.get("items") or []), "idx": 0, "answers": [], "pending": None,
+                             "retries": 0}
+            state["expect"] = "care_identity"
+            state["last_question"] = asdict(Say("care_ask_identity", {"name": care.get("first_name") or ""}))
+            return self._finish(state, TurnOutput([Say("greeting_care", {**self._c(), "name": care.get("first_name") or ""})]))
         if reminder:
             # Appointment reminder call: say who is calling, the visit, "please be on time",
             # then ask if they are coming. A reprompt repeats only that short question.
@@ -203,6 +212,8 @@ class DialogEngine:
             if not biz:
                 out.says.extend(self._reprompt(state))
                 return out
+        if str(expect or "").startswith("care_"):
+            return self._care_turn(state, out, intents, text)
         handled = await self._call_acts(state, out, intents, biz, expect)
         if handled:
             return out
@@ -461,6 +472,83 @@ class DialogEngine:
             else:
                 self._anything_else(state, out)
 
+    # ---- Continuous Care check-in (deterministic script; numbers read back) ----
+    _NUM_WORDS = {"zero": 0, "oh": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+                  "eight": 8, "nine": 9}
+
+    @classmethod
+    def care_number(cls, text: str) -> Optional[str]:
+        """A spoken / typed reading: "142", "one four two", "140 by 90" → "142" / "140/90" (pure; else None)."""
+        t = (text or "").lower().replace(" by ", "/").replace(" over ", "/")
+        digits = "".join(str(cls._NUM_WORDS[w]) if w in cls._NUM_WORDS else w for w in re.findall(r"[a-z]+|\d+|/", t)
+                         if w in cls._NUM_WORDS or w.isdigit() or w == "/")
+        m = re.fullmatch(r"(\d{2,3})(?:/(\d{2,3}))?", digits)
+        return (m.group(1) + (f"/{m.group(2)}" if m.group(2) else "")) if m else None
+
+    def _care_next(self, state: dict, out: TurnOutput) -> TurnOutput:
+        c = state["care"]
+        if c["idx"] >= len(c["items"]):
+            state["expect"] = None
+            full = all(a.get("value") is not None for a in c["answers"]) and len(c["answers"]) == len(c["items"])
+            state["outcomes"].append({"wf": "CARE", "outcome": "care_answered" if full else "care_partial",
+                                      "answers": c["answers"]})
+            out.says.append(Say("care_thanks"))
+            out.control = "end"
+            return out
+        item = c["items"][c["idx"]]
+        if item.get("kind") == "adherence":
+            self._ask(state, out, "care_adh", Say("care_ask_adherence", {"when": item.get("time") or ""}))
+        else:
+            self._ask(state, out, "care_read", Say("care_ask_reading", {"measure": item.get("measure_label") or "sugar"}))
+        return out
+
+    def _care_turn(self, state: dict, out: TurnOutput, intents: list, text: str) -> TurnOutput:
+        c, expect = state["care"], state.get("expect")
+        if expect == "care_identity":
+            if "AFFIRM" in intents:
+                return self._care_next(state, out)
+            if "DENY" in intents:
+                state["outcomes"].append({"wf": "CARE", "outcome": "care_identity_failed"})
+                out.says.append(Say("care_wrong_person"))
+                out.control = "end"
+                return out
+            return self._miss(state, out, Say("care_ask_identity", {"name": ""}))
+        item = c["items"][c["idx"]]
+        if expect == "care_adh":
+            if "AFFIRM" in intents or "DENY" in intents:
+                c["answers"].append({"item": item.get("id"), "kind": "adherence",
+                                     "value": "taken" if "AFFIRM" in intents else "missed"})
+                c["idx"] += 1
+                return self._care_next(state, out)
+            return self._miss(state, out, Say("care_ask_adherence", {"when": item.get("time") or ""}))
+        if expect == "care_read":
+            num = self.care_number(text)
+            if not num:
+                return self._miss(state, out, Say("care_ask_reading", {"measure": item.get("measure_label") or "sugar"}))
+            c["pending"] = num
+            self._ask(state, out, "care_confirm", Say("care_readback", {"number": " by ".join(" ".join(part) for part in num.split("/"))}))
+            return out
+        if expect == "care_confirm":
+            if "AFFIRM" in intents and c.get("pending"):
+                num = c["pending"]
+                c["answers"].append({"item": item.get("id"), "kind": "reading", "measure": item.get("measure"),
+                                     "value": num, "source": "voice_speech_confirmed"})
+                c["pending"], c["retries"] = None, 0
+                c["idx"] += 1
+                low = item.get("hypo_below")
+                if low and "/" not in num and float(num) < float(low):
+                    out.says.append(Say("care_hypo_now", self._c()))       # spoken in the call, not only on WhatsApp
+                return self._care_next(state, out)
+            c["pending"] = None                                            # unconfirmed numbers are never stored
+            c["retries"] += 1
+            if c["retries"] >= 2:
+                c["answers"].append({"item": item.get("id"), "kind": "reading", "value": None})
+                c["idx"], c["retries"] = c["idx"] + 1, 0
+                return self._care_next(state, out)
+            self._ask(state, out, "care_read", Say("care_ask_reading", {"measure": item.get("measure_label") or "sugar"}))
+            return out
+        return self._care_next(state, out)
+
     def _finish(self, state: dict, out: TurnOutput) -> TurnOutput:
         state["last_says"] = [asdict(s) for s in out.says]
         return out
@@ -548,6 +636,8 @@ class DialogEngine:
         from .responses import T
         if self.scope.kind == "diagnostic" and key + "_lab" in T:
             return key + "_lab"
+        if self.scope.kind == "pharmacy" and key + "_pharmacy" in T:
+            return key + "_pharmacy"
         return key
 
     @staticmethod

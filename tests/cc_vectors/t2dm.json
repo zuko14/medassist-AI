@@ -1,0 +1,792 @@
+{
+ "pack": "t2dm",
+ "cases": [
+  {
+   "name": "stable at target",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "single level-1 hypo today: watch + hypo_now",
+   "params": {},
+   "obs": [
+    [
+     "fbg",
+     0,
+     65
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "hypo"
+    ],
+    "card": "hypo_now",
+    "props": [
+     "call_patient_now"
+    ]
+   }
+  },
+  {
+   "name": "level-2 hypo (<54) urgent",
+   "params": {},
+   "obs": [
+    [
+     "rbg",
+     -2,
+     50
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "hypo"
+    ]
+   }
+  },
+  {
+   "name": "hypo boundary 70 does not fire",
+   "params": {},
+   "obs": [
+    [
+     "fbg",
+     0,
+     70
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "not": [
+     "hypo"
+    ]
+   }
+  },
+  {
+   "name": "two hypos in 7 d urgent",
+   "params": {},
+   "obs": [
+    [
+     "fbg",
+     -1,
+     65
+    ],
+    [
+     "ppbg",
+     -5,
+     68
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "hypo"
+    ]
+   }
+  },
+  {
+   "name": "hypo 3 days ago: no card",
+   "params": {},
+   "obs": [
+    [
+     "fbg",
+     -3,
+     66
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "card": null
+   }
+  },
+  {
+   "name": "hypo 8 days ago is outside the window",
+   "params": {},
+   "obs": [
+    [
+     "fbg",
+     -8,
+     60
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "not": [
+     "hypo"
+    ]
+   }
+  },
+  {
+   "name": "very high 400 today urgent + card",
+   "params": {},
+   "obs": [
+    [
+     "rbg",
+     0,
+     400
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "very_high"
+    ],
+    "card": "high_sugar_symptoms"
+   }
+  },
+  {
+   "name": "399 is not very high",
+   "params": {},
+   "obs": [
+    [
+     "rbg",
+     0,
+     399
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "very_high",
+     "high_x2"
+    ],
+    "tier": "stable"
+   }
+  },
+  {
+   "name": "two highs >= 250 in 7 d watch",
+   "params": {},
+   "obs": [
+    [
+     "ppbg",
+     -1,
+     260
+    ],
+    [
+     "ppbg",
+     -4,
+     270
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "high_x2"
+    ],
+    "props": [
+     "recheck_in_days",
+     "book_review_visit"
+    ]
+   }
+  },
+  {
+   "name": "3 of last 5 fasting above target",
+   "params": {},
+   "obs": [
+    [
+     "fbg",
+     -1,
+     140
+    ],
+    [
+     "fbg",
+     -4,
+     150
+    ],
+    [
+     "fbg",
+     -7,
+     135
+    ],
+    [
+     "fbg",
+     -10,
+     120
+    ],
+    [
+     "fbg",
+     -13,
+     110
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "fasting_above_target"
+    ]
+   }
+  },
+  {
+   "name": "2 of last 5 fasting above target does not fire",
+   "params": {},
+   "obs": [
+    [
+     "fbg",
+     -1,
+     140
+    ],
+    [
+     "fbg",
+     -4,
+     150
+    ],
+    [
+     "fbg",
+     -7,
+     120
+    ],
+    [
+     "fbg",
+     -10,
+     120
+    ],
+    [
+     "fbg",
+     -13,
+     110
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "fasting_above_target"
+    ]
+   }
+  },
+  {
+   "name": "fasting at target boundary 130 does not count",
+   "params": {},
+   "obs": [
+    [
+     "fbg",
+     -1,
+     130
+    ],
+    [
+     "fbg",
+     -4,
+     130
+    ],
+    [
+     "fbg",
+     -7,
+     130
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "fasting_above_target"
+    ]
+   }
+  },
+  {
+   "name": "HbA1c 9.2 very high",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "hba1c",
+     -20,
+     9.2,
+     "high"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "a1c_very_high"
+    ],
+    "not": [
+     "a1c_above_target"
+    ]
+   }
+  },
+  {
+   "name": "HbA1c 7.5 above target",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "hba1c",
+     -20,
+     7.5,
+     "high"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "a1c_above_target"
+    ]
+   }
+  },
+  {
+   "name": "HbA1c at target: interval doubles (199 d not overdue)",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "hba1c",
+     -199,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "not": [
+     "a1c_overdue"
+    ]
+   }
+  },
+  {
+   "name": "HbA1c at target 201 d overdue + lab_due",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "hba1c",
+     -201,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "a1c_overdue"
+    ],
+    "card": "lab_due",
+    "props": [
+     "order_lab",
+     "book_home_sample"
+    ]
+   }
+  },
+  {
+   "name": "HbA1c above target 101 d overdue",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "hba1c",
+     -101,
+     7.5,
+     "high"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "a1c_overdue",
+     "a1c_above_target"
+    ]
+   }
+  },
+  {
+   "name": "no HbA1c ever: overdue",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "a1c_overdue"
+    ],
+    "tier": "watch"
+   }
+  },
+  {
+   "name": "3 missed doses in 7 d",
+   "params": {},
+   "obs": [
+    [
+     "adherence",
+     -1,
+     null,
+     null,
+     "missed"
+    ],
+    [
+     "adherence",
+     -2,
+     null,
+     null,
+     "missed"
+    ],
+    [
+     "adherence",
+     -3,
+     null,
+     null,
+     "missed"
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "missed_doses"
+    ],
+    "tier": "watch"
+   }
+  },
+  {
+   "name": "2 missed doses does not fire",
+   "params": {},
+   "obs": [
+    [
+     "adherence",
+     -1,
+     null,
+     null,
+     "missed"
+    ],
+    [
+     "adherence",
+     -2,
+     null,
+     null,
+     "missed"
+    ],
+    [
+     "adherence",
+     -3,
+     null,
+     null,
+     "taken"
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "missed_doses"
+    ],
+    "tier": "stable"
+   }
+  },
+  {
+   "name": "eye screen due is routine (tier stays stable)",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "has": [
+     "eye_screen_due"
+    ],
+    "props": [
+     "refer"
+    ]
+   }
+  },
+  {
+   "name": "parameter override: hypo 80",
+   "params": {
+    "hypo_mgdl": 80
+   },
+   "obs": [
+    [
+     "fbg",
+     0,
+     75
+    ]
+   ],
+   "labs": [
+    [
+     "hba1c",
+     -30,
+     6.5,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "last_eye_review": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "hypo"
+    ]
+   }
+  }
+ ]
+}

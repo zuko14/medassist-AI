@@ -21,6 +21,7 @@ SCOPE_VERSION = "scope-2026.11.03"
 class Scope:
     doctors: bool = True      # consultations: book, reschedule, doctor fees
     labs: bool = True         # lab tests / scans / packages: price, book
+    pharmacy: bool = False    # a standalone pharmacy (plan `pharmacy`, migration 150): refills, timings, pharmacist
 
     @property
     def kind(self) -> str:
@@ -30,7 +31,7 @@ class Scope:
             return "diagnostic"
         if self.doctors:
             return "clinic"
-        return "none"
+        return "pharmacy" if self.pharmacy else "none"
 
 
 #: Everything on: the behaviour before plan scoping, and the default wherever no clinic is known
@@ -53,6 +54,10 @@ def scope_for(clinic: Optional[dict], doctors: Optional[list] = None) -> Scope:
         return FULL      # a plan slug this build does not know: never narrower than before
     labs = has_feature(clinic, "lab_test_booking")
     diagnostics_only = labs and doctors is not None and not doctors
+    from app.services.tenant import PHARMACY_PLANS
+    if clinic.get("plan") in PHARMACY_PLANS:
+        # RXR-ADR-9 / VERIFICATION D14: a medical store never offers a doctor or a test booking on a call
+        return Scope(doctors=False, labs=False, pharmacy=True)
     return Scope(doctors=has_feature(clinic, "booking") and not diagnostics_only, labs=labs)
 
 

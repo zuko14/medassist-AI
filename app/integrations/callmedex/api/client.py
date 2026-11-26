@@ -69,6 +69,10 @@ async def request(
     CallMedex caches the response only after the handler finishes, so a
     retry racing a slow first attempt could create a second booking.
     """
+    from app.integrations.callmedex.switch import callmedex_enabled
+    if not await callmedex_enabled():
+        logger.info(f"CallMedex switched off by the owner — skipping {method} {path}")
+        return None
     base = callmedex_settings.callmedex_base_url.strip().rstrip("/")
     if not base:
         logger.info(f"CallMedex base URL not configured — skipping {method} {path}")

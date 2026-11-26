@@ -1,0 +1,223 @@
+{
+ "pack": "post_discharge",
+ "cases": [
+  {
+   "name": "fine after discharge, reviewed",
+   "params": {},
+   "obs": [
+    [
+     "symptoms",
+     -1,
+     null,
+     null,
+     "none"
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "discharged_on": "d:-12"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -4,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "danger symptom today: urgent + card",
+   "params": {},
+   "obs": [
+    [
+     "symptoms",
+     0,
+     null,
+     null,
+     "danger"
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "discharged_on": "d:-2"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "danger_symptom"
+    ],
+    "card": "post_op_danger"
+   }
+  },
+  {
+   "name": "danger yesterday: urgent, no card",
+   "params": {},
+   "obs": [
+    [
+     "symptoms",
+     -1,
+     null,
+     null,
+     "danger"
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "discharged_on": "d:-2"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "card": null
+   }
+  },
+  {
+   "name": "danger 4 days ago outside window",
+   "params": {},
+   "obs": [
+    [
+     "symptoms",
+     -4,
+     null,
+     null,
+     "danger"
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "discharged_on": "d:-5"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "danger_symptom"
+    ]
+   }
+  },
+  {
+   "name": "review missed (day 7 + 3 grace)",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "discharged_on": "d:-11"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "review_missed"
+    ]
+   }
+  },
+  {
+   "name": "review not yet missed on the grace boundary",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "discharged_on": "d:-10"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "review_missed"
+    ]
+   }
+  },
+  {
+   "name": "structured follow-up date wins",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "discharged_on": "d:-6",
+    "follow_up_on": "d:-4"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "review_missed"
+    ]
+   }
+  },
+  {
+   "name": "visit before discharge does not count",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "discharged_on": "d:-12"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -13,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "review_missed"
+    ]
+   }
+  },
+  {
+   "name": "3 missed discharge doses",
+   "params": {},
+   "obs": [
+    [
+     "adherence",
+     -1,
+     null,
+     null,
+     "missed"
+    ],
+    [
+     "adherence",
+     -1,
+     null,
+     null,
+     "missed"
+    ],
+    [
+     "adherence",
+     -1,
+     null,
+     null,
+     "missed"
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "discharged_on": "d:-3"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "missed_doses"
+    ]
+   }
+  }
+ ]
+}

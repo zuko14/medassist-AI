@@ -1,0 +1,152 @@
+{
+ "pack": "anc",
+ "cases": [
+  {
+   "name": "20 weeks, dating scan done, recent contact",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "edd": "d:140",
+    "dating_nt_scan_done": true
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "20 weeks, dating scan not done",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "edd": "d:140"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "dating_nt_scan_overdue"
+    ],
+    "not": [
+     "anomaly_scan_overdue"
+    ]
+   }
+  },
+  {
+   "name": "30 weeks: GDM OGTT overdue -> order_lab; contact gap 14 + 7",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "edd": "d:70",
+    "dating_nt_scan_done": true,
+    "anomaly_scan_done": true
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -22,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "gdm_ogtt_overdue",
+     "anc_contact_due"
+    ],
+    "props": [
+     "order_lab"
+    ]
+   }
+  },
+  {
+   "name": "BP 140 systolic urgent + card",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     0,
+     140,
+     85
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "edd": "d:140",
+    "dating_nt_scan_done": true
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "bp_high_pregnancy"
+    ],
+    "card": "anc_danger_signs"
+   }
+  },
+  {
+   "name": "BP 139/89 fine",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     0,
+     139,
+     89
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "edd": "d:140",
+    "dating_nt_scan_done": true
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "bp_high_pregnancy"
+    ]
+   }
+  },
+  {
+   "name": "danger sign urgent",
+   "params": {},
+   "obs": [
+    [
+     "symptoms",
+     0,
+     null,
+     null,
+     "danger"
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "edd": "d:140",
+    "dating_nt_scan_done": true
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "anc_danger"
+    ],
+    "card": "anc_danger_signs"
+   }
+  }
+ ]
+}

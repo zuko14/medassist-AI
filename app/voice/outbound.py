@@ -226,6 +226,28 @@ async def _today_count(clinic_id: str) -> int:
     return len(res.data or [])
 
 
+CARE = "care_checkin"
+
+
+def _care_cap(clinic: dict) -> int:
+    return int(((clinic.get("cc_settings") or {}).get("care_daily_cap")) or 30)
+
+
+async def _care_today(clinic_id: str) -> int:
+    """Care check-in calls placed today (their jobs were attempted today)."""
+    start = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    res = await sb(supabase.table("voice_outbound_jobs").select("id").eq("clinic_id", clinic_id).eq("purpose", CARE)
+                   .gt("attempts", 0).gte("updated_at", start).limit(1000))
+    return len(res.data or [])
+
+
+async def _care_today_if_cc(clinic: dict) -> int:
+    """Care calls do not use the lead / callback cap. Zero (and no query) for a clinic that never had Continuous Care."""
+    if (clinic.get("cc_state") or "OFF") == "OFF":
+        return 0
+    return await _care_today(clinic["id"])
+
+
 async def _in_flight(clinic_id: str) -> int:
     """Outbound calls of this clinic still ringing or talking. A row stuck in a
     live status (a lost provider callback) stops counting after 15 minutes,
@@ -266,9 +288,14 @@ async def dispatch_due(limit: int = 20) -> int:
                 await sb(supabase.table("voice_outbound_jobs").update({"status": "skipped", "last_error": "too_late"})
                          .eq("clinic_id", cid).eq("id", job["id"]))
                 continue
+        elif job.get("purpose") == CARE:
+            # Continuous Care check-ins (ADR-CC-16): their own daily cap, never the lead / callback budget
+            later = next_window_start(out_cfg, now)
+            if later is None and await _care_today(cid) >= _care_cap(clinic):
+                later = next_window_start(out_cfg, now.replace(hour=23, minute=59))
         else:
             later = next_window_start(out_cfg, now)
-            if later is None and await _today_count(cid) >= int(out_cfg.get("daily_cap") or 0):
+            if later is None and await _today_count(cid) - await _care_today_if_cc(clinic) >= int(out_cfg.get("daily_cap") or 0):
                 later = next_window_start(out_cfg, now.replace(hour=23, minute=59))
         if later is not None:
             await sb(supabase.table("voice_outbound_jobs").update({"next_attempt_at": later.isoformat()})
@@ -316,6 +343,8 @@ async def dispatch_due(limit: int = 20) -> int:
                                              "outbound_job_id": job["id"],
                                              "handoff_packet": ({"reminder": (job.get("context") or {}).get("appointment")}
                                                                 if reminder else
+                                                                {"care": (job.get("context") or {}).get("care")}
+                                                                if job.get("purpose") == CARE else
                                                                 {"interest": (job.get("context") or {}).get("interest")}),
                                              "language": store.voice_config(clinic)["primary_language"]})
         if not call:

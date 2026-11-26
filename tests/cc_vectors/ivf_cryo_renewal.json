@@ -1,0 +1,41 @@
+{
+ "pack": "ivf_cryo_renewal",
+ "cases": [
+  {
+   "name": "storage expires in 60 d",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "storage_expires_on": "d:60"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "storage_renewal_due"
+    ]
+   }
+  },
+  {
+   "name": "expires in 61 d",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "storage_expires_on": "d:61"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  }
+ ]
+}

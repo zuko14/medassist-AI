@@ -23,6 +23,7 @@ from app.integrations.callmedex.api.schemas import (
     ProcessReportResponse,
     HealthCheckResponse,
 )
+from app.integrations.callmedex.switch import require_callmedex_enabled
 from app.integrations.callmedex.workers.runner import CallMedexWorkerRunner, CallMedexContainer
 from app.utils.security import login_rate_limiter
 from app.database import sb  # T5.1: off-loop query execution
@@ -33,6 +34,7 @@ router = APIRouter(
     prefix="/internal/integrations/callmedex",
     tags=["CallMedex Integration"],
     include_in_schema=False,
+    dependencies=[Depends(require_callmedex_enabled)],   # owner master switch (migration 158), off by default
 )
 
 # Subsystem Container & Worker Runner singletons

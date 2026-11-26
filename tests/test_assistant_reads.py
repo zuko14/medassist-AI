@@ -48,6 +48,9 @@ READS = {
     "dx.held_dues", "dx.today_summary",
     "rx.stock_lookup", "rx.batch_expiry", "rx.low_stock", "rx.near_expiry", "rx.pending_indents",  # RX (P9)
     "rx.my_ward_indent_status", "rx.refill_requests", "rx.today_summary", "rx.find_bill",
+    "ri.yesterday",  # Revenue Guard (migration 143)
+    "cc.radar_today", "cc.urgent_cases", "cc.inbox_count", "cc.outcomes_month", "cc.not_responding",  # CC (145–149)
+    "sp.optical_ready", "sp.instalments_due", "sp.licences_due",  # Specialty OS (151–155)
 }
 NOT_YET = {"patient.view", "voice.call_detail", "patient.duplicate_check", "voice.test_turn"}
 CORPUS = json.loads((Path(__file__).parent / "fixtures" / "assistant_corpus.json")
@@ -289,6 +292,22 @@ DATA = {
                                            "raised_at": "2026-11-18T04:30:00Z"}]},
     "/admin/rx/refills/requests": {"requests": [{"patient": {"name": "Lakshmi Devi"}, "item": {"brand_name": "Glycomet 500"},
                                                  "created_at": "2026-11-18T04:30:00Z", "channel": "whatsapp"}]},
+    "/admin/cc/radar": {"rows": [{"patient_name": "Lakshmi Devi", "label": "Overdue follow-up", "score": 46,
+                                  "detail": {"unanswered": 3}}]},
+    "/admin/cc/cases": {"cases": [{"patient_name": "Ravi Kumar", "tier": "urgent", "reason": "t2dm:hypo",
+                                   "due_by": "2026-11-18T06:30:00Z"}]},
+    "/admin/cc/inbox": {"cases": [{"patient_name": "Sita Devi", "tier": "watch", "reason": "htn:uncontrolled",
+                                   "due_by": "2026-11-19T06:30:00Z"}]},
+    "/admin/cc/outcomes": {"funnel": {"active": 42}, "return_rate": 70, "baseline_return_rate": 40, "labs_on_time": 60,
+                           "visits_verified": 7, "revenue_paise": 1580000, "method_version": "outcomes-1"},
+    "/admin/ri/summary": {"yesterday_leakage_paise": 1840000, "yesterday_leakage_count": 7,
+                          "open_over_7d_paise": 4200000, "recovered_paise": 950000, "dismissed_paise": 0,
+                          "integrity_open": 0},
+    "/admin/sp/optical/board": {"columns": {"advance_paid": [], "at_lab": [], "delivered": [],
+                                            "ready": [{"patient_name": "Anil Rao", "lens_desc": "PAL 1.6", "balance_paise": 450000}]}},
+    "/admin/sp/instalments/due": {"instalments": [{"due_on": "2026-11-28", "outstanding_paise": 400000, "status": "due"}]},
+    "/admin/sp/compliance": {"items": [{"label": "AERB RVG unit", "valid_until": "2026-12-10", "state": "renew_soon"},
+                                       {"label": "Fire NOC", "valid_until": "2027-10-01", "state": "valid"}]},
     "/admin/rx/dashboard": {"sales_today_paise": 1250000, "sales_count": 41, "pending_indents_count": 2,
                             "register_chain_status": {"ok": True}},
     "/admin/rx/sales": {"sales": [{"sale_number": "PHS-2026-000431", "status": "completed", "net_paise": 45000,
@@ -376,11 +395,19 @@ CASES = [
     ("new refill requests", "rx.refill_requests", "/admin/rx/refills/requests", {"status": "new"}, "Glycomet 500", 1),
     ("pharmacy sales today", "rx.today_summary", "/admin/rx/dashboard", {}, "₹12,500", None),
     ("find bill PHS-2026-000431", "rx.find_bill", "/admin/rx/sales", {"q": "PHS-2026-000431"}, "PHS-2026-000431", 1),
+    ("what was not billed yesterday", "ri.yesterday", "/admin/ri/summary", {}, "₹18,400", None),
+    ("who is overdue today", "cc.radar_today", "/admin/cc/radar", {}, "Lakshmi Devi", 1),
+    ("any urgent care cases", "cc.urgent_cases", "/admin/cc/cases", {"tier": "urgent"}, "Ravi Kumar", 1),
+    ("how many need my approval", "cc.inbox_count", "/admin/cc/inbox", {}, "Sita Devi", 1),
+    ("care programme results this month", "cc.outcomes_month", "/admin/cc/outcomes", {}, "70", None),
+    ("who has not replied to care messages", "cc.not_responding", "/admin/cc/radar", {"reason": "not_responding"},
+     "Lakshmi Devi", 1),
 ]
 EVERYTHING_ON = {"id": CID, "plan": "diagbooking", "account_type": "tenant", "opd_state": "READY",
                  "features": {"kriya_ketu": True, "opd_enabled": True, "ai_receptionist": True, "booking": True,
                               "specialty_treatments": True, "ipd_enabled": True,
-                              "dx_enabled": True, "pharmacy_enabled": True}}
+                              "dx_enabled": True, "pharmacy_enabled": True, "revenue_guard": True,
+                              "care_enabled": True}}
 
 client = TestClient(app)
 
@@ -400,8 +427,34 @@ def _ask(text, page="dashboard"):
         "ui_context": {"page": page}}).json()
 
 
+# Specialty OS reads need a specialty plan with the module on (diagbooking is not eligible), so they run on SP_ON.
+SP_ON = {**EVERYTHING_ON, "plan": "eye", "features": {**EVERYTHING_ON["features"], "specialty_os": True,
+                                                     "optical_enabled": True}}
+CASES_SP = [
+    ("are any spectacles ready", "sp.optical_ready", "/admin/sp/optical/board", {}, "Anil Rao", 1),
+    ("instalments due this week", "sp.instalments_due", "/admin/sp/instalments/due", {}, "₹4,000", 1),
+    ("licence renewal list", "sp.licences_due", "/admin/sp/compliance", {}, "AERB RVG unit", 1),
+]
+
+
 def test_cases_cover_every_read():
-    assert {c[1] for c in CASES} == READS
+    assert {c[1] for c in CASES + CASES_SP} == READS
+
+
+@pytest.mark.parametrize("text, aid, path, query, shows, total", CASES_SP, ids=[c[1] for c in CASES_SP])
+def test_specialty_reads_return_the_pages_data(db, reads, text, aid, path, query, shows, total):  # noqa: F811
+    with patch.object(assistant_router, "get_clinic_by_id", AsyncMock(return_value=SP_ON)):
+        out = _ask(text)
+    assert (out["state"], out["action_id"]) == ("COMPLETED_VERIFIED", aid), out
+    assert len(SEEN) == 1 and SEEN[0][0] == path and SEEN[0][1]["clinic_id"] == CID
+    card = out["cards"][0]
+    assert card["type"] == "table" and card["page"] == REGISTRY[aid].page and card["total"] == total
+    assert any(shows in cell for row in card["rows"] for cell in row), card
+
+
+def test_specialty_reads_are_refused_on_a_clinic_without_the_module(db, reads):  # noqa: F811
+    out = _ask("are any spectacles ready")                              # EVERYTHING_ON: diagbooking, no Specialty OS
+    assert out["state"] == "REJECTED" and SEEN == []
 
 
 @pytest.mark.parametrize("text, aid, path, query, shows, total", CASES, ids=[c[1] for c in CASES])
@@ -469,7 +522,9 @@ def test_handler_reads_are_the_expected_ones():
                                   "dx.find_visit", "dx.held_dues", "dx.today_summary",
                                   "rx.stock_lookup", "rx.batch_expiry", "rx.low_stock", "rx.near_expiry",
                                   "rx.pending_indents", "rx.my_ward_indent_status", "rx.refill_requests",
-                                  "rx.today_summary", "rx.find_bill"}
+                                  "rx.today_summary", "rx.find_bill", "ri.yesterday", "cc.radar_today",
+                                  "cc.urgent_cases", "cc.inbox_count", "cc.outcomes_month", "cc.not_responding",
+                                  "sp.optical_ready", "sp.instalments_due", "sp.licences_due"}
 
 
 @pytest.mark.parametrize("aid", HANDLER_READS)

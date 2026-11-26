@@ -59,10 +59,11 @@ class OPDDocument(FPDF):
             pass
 
 
-def render_prescription_pdf(rx: dict, items: list[dict]) -> bytes:
+def render_prescription_pdf(rx: dict, items: list[dict], forms: Optional[list[dict]] = None) -> bytes:
     """Render signed e-prescription as A5 portrait PDF from immutable snapshots.
 
-    Draft prescriptions are rejected with HTTP 409.
+    Draft prescriptions are rejected with HTTP 409. `forms` (Specialty OS S2, frozen with the encounter) adds an
+    examination block; with no form rows the output is byte-identical to a prescription without the feature.
     """
     if rx.get("status") == "draft":
         raise HTTPException(
@@ -206,6 +207,21 @@ def render_prescription_pdf(rx: dict, items: list[dict]) -> bytes:
         pdf.cell(0, 5, "Advice & General Instructions:", border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_font("NotoSans", "", 7)
         pdf.multi_cell(0, 4, gen_instr)
+
+    # 5b. Specialty examination block (S2 forms) — only when form rows exist
+    if forms:
+        from app.services.sp_forms import FORMS, pdf_lines
+        pdf.ln(3)
+        for form in forms:
+            lines = [ln for ln in pdf_lines(form) if ln]
+            if not lines:
+                continue
+            pdf.set_font("NotoSans", "B", 8)
+            title = (FORMS.get(form["form_code"]) or (None, None, None, form["form_code"]))[3]
+            pdf.cell(0, 5, f"{title}:", border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("NotoSans", "", 7)
+            for ln in lines:
+                pdf.multi_cell(0, 4, ln, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # 6. Clinician Signature block (from signer_snapshot)
     pdf.ln(6)

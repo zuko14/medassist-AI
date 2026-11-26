@@ -33,6 +33,7 @@ from app.integrations.callmedex.workers.runner import (
 )
 from app.database import sb
 from app.services.distributed_lock import distributed_lock_manager
+from app.integrations.callmedex.switch import require_callmedex_enabled
 from app.utils.async_tasks import spawn_background_task
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,9 @@ v1_router = APIRouter(
     prefix="/api/v1",
     tags=["CallMedex External Integration API (v1)"],
     include_in_schema=False,
-    dependencies=[Depends(verify_callmedex_auth_and_hmac), Depends(require_timestamped_signature)],
+    # owner master switch first (migration 158, off by default): while off nothing is authenticated or accepted
+    dependencies=[Depends(require_callmedex_enabled), Depends(verify_callmedex_auth_and_hmac),
+                  Depends(require_timestamped_signature)],
 )
 
 

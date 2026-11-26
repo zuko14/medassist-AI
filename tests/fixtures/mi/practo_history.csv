@@ -1,0 +1,5 @@
+UHID,Patient Name,Mobile,Visit Date,Doctor,Final Diagnosis,ICD Code,Medicines
+MR-1001,Lakshmi Devi,9848022338,02/03/2026,Dr. Ramesh Rao,Type 2 diabetes mellitus,,Metformin 500 mg BD
+MR-1001,Lakshmi Devi,9848022338,10/01/2026,Dr. Ramesh Rao,Essential hypertension,I10,Amlodipine 5 mg OD
+MR-9999,Nobody,9000099999,10/01/2026,Dr. X,Fever,,
+MR-1002,,,32/13/2026,Dr. Y,Cough,,

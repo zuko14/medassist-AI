@@ -1,0 +1,231 @@
+{
+ "pack": "derma_methotrexate",
+ "cases": [
+  {
+   "name": "early phase labs on time",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "wbc",
+     -20,
+     6,
+     "normal"
+    ],
+    [
+     "alt",
+     -20,
+     30,
+     "normal"
+    ],
+    [
+     "creatinine",
+     -20,
+     0.9,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "started_on": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "early phase labs 29 d old due",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "wbc",
+     -29,
+     6,
+     "normal"
+    ],
+    [
+     "alt",
+     -29,
+     30,
+     "normal"
+    ],
+    [
+     "creatinine",
+     -29,
+     0.9,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "started_on": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "wbc_due",
+     "alt_due",
+     "creatinine_due"
+    ]
+   }
+  },
+  {
+   "name": "late phase 60 d old labs fine",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "wbc",
+     -60,
+     6,
+     "normal"
+    ],
+    [
+     "alt",
+     -60,
+     30,
+     "normal"
+    ],
+    [
+     "creatinine",
+     -60,
+     0.9,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "started_on": "d:-200"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "late phase 85 d old labs due",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "wbc",
+     -85,
+     6,
+     "normal"
+    ],
+    [
+     "alt",
+     -85,
+     30,
+     "normal"
+    ],
+    [
+     "creatinine",
+     -85,
+     0.9,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "started_on": "d:-200"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "wbc_due"
+    ]
+   }
+  },
+  {
+   "name": "ALT high: urgent + card",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "wbc",
+     -5,
+     6,
+     "normal"
+    ],
+    [
+     "alt",
+     -5,
+     120,
+     "high"
+    ],
+    [
+     "creatinine",
+     -5,
+     0.9,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "started_on": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "lab_flag"
+    ],
+    "card": "mtx_warning_signs"
+   }
+  },
+  {
+   "name": "WBC low: urgent",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "wbc",
+     -5,
+     2.5,
+     "low"
+    ],
+    [
+     "alt",
+     -5,
+     30,
+     "normal"
+    ],
+    [
+     "creatinine",
+     -5,
+     0.9,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "started_on": "d:-30"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "lab_flag"
+    ]
+   }
+  }
+ ]
+}

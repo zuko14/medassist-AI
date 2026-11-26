@@ -1,0 +1,58 @@
+{
+ "pack": "dental_ortho",
+ "cases": [
+  {
+   "name": "adjustment overdue",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -36,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "adjustment_due"
+    ]
+   }
+  },
+  {
+   "name": "retainer check due after debond",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "debonded_on": "d:-100"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -20,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "retainer_check_due"
+    ],
+    "not": [
+     "adjustment_due"
+    ]
+   }
+  },
+  {
+   "name": "adjusted recently",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -20,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  }
+ ]
+}

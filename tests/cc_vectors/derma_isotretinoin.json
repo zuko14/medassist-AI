@@ -1,0 +1,278 @@
+{
+ "pack": "derma_isotretinoin",
+ "cases": [
+  {
+   "name": "reviewed, labs on time",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "alt",
+     -10,
+     30,
+     "normal"
+    ],
+    [
+     "lipid_total",
+     -10,
+     180,
+     "normal"
+    ]
+   ],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "monthly review overdue",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "alt",
+     -10,
+     30,
+     "normal"
+    ],
+    [
+     "lipid_total",
+     -10,
+     180,
+     "normal"
+    ]
+   ],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -31,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "monthly_review_due"
+    ]
+   }
+  },
+  {
+   "name": "ALT 31 d old due",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "alt",
+     -31,
+     30,
+     "normal"
+    ],
+    [
+     "lipid_total",
+     -10,
+     180,
+     "normal"
+    ]
+   ],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "alt_due"
+    ],
+    "not": [
+     "lipid_total_due"
+    ]
+   }
+  },
+  {
+   "name": "can become pregnant, never tested: urgent",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "alt",
+     -10,
+     30,
+     "normal"
+    ],
+    [
+     "lipid_total",
+     -10,
+     180,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "can_become_pregnant": true
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "pregnancy_test_due"
+    ]
+   }
+  },
+  {
+   "name": "pregnancy test 31 d old: watch",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "alt",
+     -10,
+     30,
+     "normal"
+    ],
+    [
+     "lipid_total",
+     -10,
+     180,
+     "normal"
+    ],
+    [
+     "beta_hcg",
+     -31,
+     1,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "can_become_pregnant": true
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "pregnancy_test_due"
+    ]
+   }
+  },
+  {
+   "name": "pregnancy test 20 d old: fine",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "alt",
+     -10,
+     30,
+     "normal"
+    ],
+    [
+     "lipid_total",
+     -10,
+     180,
+     "normal"
+    ],
+    [
+     "beta_hcg",
+     -20,
+     1,
+     "normal"
+    ]
+   ],
+   "extra": {
+    "can_become_pregnant": true
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "pregnancy_test_due"
+    ]
+   }
+  },
+  {
+   "name": "PHQ-2 >= 3 mood change urgent",
+   "params": {},
+   "obs": [
+    [
+     "phq2",
+     -1,
+     3
+    ]
+   ],
+   "labs": [
+    [
+     "alt",
+     -10,
+     30,
+     "normal"
+    ],
+    [
+     "lipid_total",
+     -10,
+     180,
+     "normal"
+    ]
+   ],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "mood_change"
+    ],
+    "card": "mood_change",
+    "props": [
+     "call_patient_now",
+     "refer"
+    ]
+   }
+  },
+  {
+   "name": "PHQ-2 2 fine",
+   "params": {},
+   "obs": [
+    [
+     "phq2",
+     -1,
+     2
+    ]
+   ],
+   "labs": [
+    [
+     "alt",
+     -10,
+     30,
+     "normal"
+    ],
+    [
+     "lipid_total",
+     -10,
+     180,
+     "normal"
+    ]
+   ],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "mood_change"
+    ]
+   }
+  }
+ ]
+}

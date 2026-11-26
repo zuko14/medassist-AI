@@ -142,6 +142,29 @@ TENANT_OWNED_TABLES = frozenset({
     "rx_register_entries",
     # Migration 142: Pharmacy OS refills, alerts, item metrics
     "rx_refill_plans", "rx_refill_requests", "rx_alerts", "rx_item_metrics",
+    # Migration 143: Revenue Guard (docs/revenue-integrity/SPEC.md §4)
+    "ri_runs", "ri_findings",
+    # Migration 144: Data import (docs/data-import/SPEC.md §4)
+    "mi_batches", "mi_row_errors", "mi_batch_items", "mi_patient_links", "mi_match_queue", "mi_legacy_encounters",
+    "mi_legacy_lab_values", "mi_opening_balances", "mi_diagnosis_map", "mi_chronic_candidates",
+    # Migrations 145–149: Continuous Care (docs/continuous-care/DATA-MODEL.md)
+    "cc_protocol_activations", "cc_consents", "cc_cards",
+    "cc_enrollments", "cc_care_plans", "cc_plan_items", "cc_discharge_followups",
+    "cc_schedule_items", "cc_prompts", "cc_observations", "cc_measure_sources", "cc_evaluations",
+    "cc_radar_rows", "cc_cases", "cc_case_events", "cc_actions",
+    "cc_verifications", "cc_outcome_snapshots",
+    # Migration 150: standalone pharmacy order requests (docs/pharmacy-os/RETAIL-PLAN.md §4)
+    "pharmacy_order_requests",
+    # Migrations 151–155: Specialty OS (docs/specialty-os/README.md)
+    "sp_media_consents", "sp_media", "opd_encounter_forms",
+    "sp_packages", "sp_package_sales", "sp_package_consumptions", "sp_instalments", "sp_estimates", "sp_imaging_links",
+    "sp_camps", "sp_camp_registrations",
+    "sp_optical_jobs", "sp_dental_lab_orders", "sp_compliance_items",
+    "ivf_couples", "ivf_cycles", "ivf_cycle_days", "ivf_embryos", "ivf_witness_events",
+    "obs_pregnancies", "obs_anc_visits", "imm_doses",
+    # Migration 156: Women & Child completion + optical stock
+    "obs_deliveries", "obs_newborns", "child_growth_measurements", "wc_gov_ids", "nicu_flowsheet_entries",
+    "sp_optical_items", "sp_optical_stock_moves",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

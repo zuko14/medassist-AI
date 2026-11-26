@@ -185,8 +185,16 @@ class PgBridge:
                 body = req.json if isinstance(req.json, list) else [req.json]
                 keys = sorted({k for row in body for k in row})
                 cols = ", ".join(_ident(k) for k in keys)
+                # upsert (MI, migration 144): on_conflict + Prefer resolution=ignore-/merge-duplicates
+                conflict = ""
+                target = dict(params).get("on_conflict")
+                if target and "resolution=ignore-duplicates" in prefer:
+                    conflict = f" ON CONFLICT ({', '.join(_ident(c) for c in target.split(','))}) DO NOTHING"
+                elif target and "resolution=merge-duplicates" in prefer:
+                    sets = ", ".join(f"{_ident(k)} = EXCLUDED.{_ident(k)}" for k in keys)
+                    conflict = f" ON CONFLICT ({', '.join(_ident(c) for c in target.split(','))}) DO UPDATE SET {sets}"
                 cur.execute(f"INSERT INTO {table} ({cols}) SELECT {cols} FROM jsonb_populate_recordset("
-                            f"NULL::{table}, %s) RETURNING to_jsonb({table}.*)", [psycopg2.extras.Json(body)])
+                            f"NULL::{table}, %s){conflict} RETURNING to_jsonb({table}.*)", [psycopg2.extras.Json(body)])
                 rows, count = [r[0] for r in cur.fetchall()], None
             elif method == "PATCH":
                 keys = list(req.json)

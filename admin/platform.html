@@ -29,13 +29,17 @@
 
             --text: #E4EFF1;
             --text2: #9FB6BF;
-            --text3: #6E8794;
+            --text3: #7E97A3;
             --mint: #C7EAE1;
 
             --accent: #3D8BFD;
             --accent-light: #7DB2FF;
             --accent-glow: rgba(61,139,253,0.22);
             --brand-grad: linear-gradient(135deg, #10B981 0%, #2FA8D8 55%, #3D8BFD 100%);
+            /* A11Y (docs/design/A11Y-CONTRAST-PLAN.md): fills that carry white text. */
+            --action-grad: linear-gradient(135deg, #047857 0%, #0E6FA8 55%, #1668D6 100%);
+            --accent-fill: #1A66D1;
+            --red-fill: #C62F3B;
 
             --cyan: #22D3EE;
             --cyan-glow: rgba(34,211,238,0.20);
@@ -184,7 +188,7 @@
         .btn-primary {
             width: 100%;
             padding: 14px;
-            background: linear-gradient(135deg, var(--accent), var(--cyan));
+            background: var(--action-grad);
             border: none;
             border-radius: var(--radius-sm);
             color: #fff;
@@ -241,7 +245,7 @@
         .brand-logo {
             width: 42px;
             height: 42px;
-            background: linear-gradient(135deg, var(--accent), var(--cyan));
+            background: var(--surface2);
             border-radius: 12px;
             display: flex;
             align-items: center;
@@ -584,6 +588,7 @@
         .badge-ivf { background: rgba(251,146,60,0.12); color: #fb923c; }
         .badge-multispecialty { background: rgba(125,211,252,0.14); color: #7dd3fc; }
         .badge-womenchild { background: rgba(244,114,182,0.14); color: #f472b6; }
+        .badge-pharmacy { background: var(--green-bg); color: var(--green); }
 
         .status-active { background: var(--green-bg); color: var(--green); }
         .status-dormant { background: var(--red-bg); color: var(--red); }
@@ -601,7 +606,7 @@
         }
 
         .action-btn:hover {
-            background: var(--accent);
+            background: var(--accent-fill);
             color: #fff;
         }
 
@@ -773,7 +778,7 @@
             opacity: 0.5;
             pointer-events: none;
         }
-        .btn-primary { background: var(--brand-grad); }
+        .btn-primary { background: var(--action-grad); }
 
         /* Gradient mark on a dark glass tile, mirroring the logo's navy field. */
         .brand-logo {
@@ -1004,6 +1009,60 @@
         @media (prefers-reduced-motion: reduce) {
             .glass-overlay, .glass-dialog, .corp-bar, .corp-toast { transition: none; }
         }
+        /* OC:START — owner console segments + module eligibility (OWNER-CONSOLE.md OC-02…OC-09; UI spec §7.10). Tokens only. */
+        .oc-segs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+        .oc-seg { width: auto; cursor: pointer; }
+        .oc-seg[aria-selected="true"] { border-color: var(--accent); color: var(--text); }
+        .oc-kpis { margin-bottom: 16px; }
+        .oc-mod { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--border); }
+        .oc-mod:last-child { border-bottom: 0; }
+        .oc-mod label { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text); cursor: pointer; min-height: 44px; }
+        .oc-mod .oc-why { grid-column: 2; color: var(--text2); font-size: 0.76rem; }
+        .oc-meta { color: var(--text2); font-size: 0.8rem; }
+        /* OC:END */
+        /* TPL:START — suggested module template per plan + permanent erase. Live tokens only (UI spec §1.1). */
+        .tpl-card { background: var(--surface2); border: 1px solid var(--accent-border); border-radius: var(--radius-sm); padding: 20px; margin-bottom: 16px; }
+        .tpl-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+        .tpl-title { color: var(--text); font-size: 1rem; font-weight: 700; margin: 0; }
+        .tpl-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--accent-border); border-radius: 999px; padding: 3px 10px; font-size: 0.74rem; color: var(--text); background: var(--surface); }
+        .tpl-summary { color: var(--text2); font-size: 0.82rem; line-height: 1.5; margin: 8px 0 14px; }
+        .tpl-group { color: var(--text2); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin: 14px 0 8px; }
+        .tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 8px; }
+        .tpl-mod { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; align-items: start; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--surface); cursor: pointer; min-height: 44px; transition: border-color 150ms ease-out; }
+        .tpl-mod:hover { border-color: var(--border2); }
+        .tpl-mod.is-on { border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+        .tpl-mod.is-na { cursor: not-allowed; opacity: 0.72; }
+        .tpl-mod input { margin-top: 3px; accent-color: var(--accent); width: 16px; height: 16px; }
+        .tpl-mod-name { color: var(--text); font-size: 0.85rem; font-weight: 600; overflow-wrap: anywhere; }
+        .tpl-mod-why { grid-column: 2; color: var(--text2); font-size: 0.74rem; line-height: 1.4; overflow-wrap: anywhere; }
+        .tpl-state { font-size: 0.7rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-left: 6px; white-space: nowrap; }
+        .tpl-state.on { color: var(--green); background: var(--green-bg); }
+        .tpl-state.setup { color: var(--amber); background: var(--amber-bg); }
+        .tpl-opd { margin-top: 14px; border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent); background: var(--amber-bg); border-radius: var(--radius-sm); padding: 12px 14px; color: var(--text); font-size: 0.8rem; line-height: 1.5; }
+        .tpl-bar { height: 6px; border-radius: 999px; background: var(--surface); overflow: hidden; margin: 8px 0 4px; }
+        .tpl-bar > span { display: block; height: 100%; background: var(--brand-grad); }
+        .tpl-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; align-items: center; }
+        .tpl-actions .btn-primary, .tpl-actions .btn-secondary { width: auto; padding: 10px 18px; min-height: 44px; }
+        .tpl-result { color: var(--text2); font-size: 0.8rem; flex: 1 1 200px; }
+        .tpl-erase { margin-top: 12px; border: 1px solid var(--red); border-radius: var(--radius-sm); padding: 12px 14px; background: var(--red-bg); }
+        .tpl-erase label { display: flex; gap: 10px; align-items: flex-start; color: var(--text); font-size: 0.84rem; cursor: pointer; min-height: 44px; }
+        .tpl-erase input { margin-top: 3px; accent-color: var(--red); }
+        .tpl-plan { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; }
+        .tpl-plan select { width: auto; min-width: 220px; min-height: 44px; }
+        .tpl-impact { border: 1px solid var(--accent-border); border-radius: var(--radius-sm); background: var(--surface); padding: 12px 14px; margin-bottom: 14px; color: var(--text); font-size: 0.82rem; line-height: 1.55; }
+        .tpl-impact ul { margin: 4px 0 8px 18px; color: var(--text2); }
+        .tpl-impact label { display: flex; gap: 8px; align-items: center; min-height: 44px; cursor: pointer; }
+        @media (prefers-reduced-motion: reduce) { .tpl-mod { transition: none; } }
+        /* TPL:END */
+        /* CMX:START — CallMedex master switch. Live tokens only. */
+        .cmx-switch { margin: 0 4px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); padding: 12px 14px; }
+        .cmx-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; cursor: pointer; min-height: 44px; color: var(--text); font-size: 0.88rem; }
+        .cmx-row input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--accent); }
+        .cmx-why { display: block; color: var(--text2); font-size: 0.78rem; line-height: 1.5; margin-top: 4px; }
+        .cmx-pill { font-size: 0.7rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-left: 6px; }
+        .cmx-pill.on { color: var(--green); background: var(--green-bg); }
+        .cmx-pill.off { color: var(--red); background: var(--red-bg); }
+        /* CMX:END */
     </style>
 </head>
 <body>
@@ -1100,7 +1159,7 @@
                 <div style="position:relative;">
                     <button class="btn-secondary" id="ownerBellBtn" onclick="toggleOwnerBell()" aria-label="Client message notifications" aria-haspopup="true" aria-expanded="false" title="Client messages" style="position:relative; padding:9px 12px;">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
-                        <span id="ownerBellBadge" style="display:none; position:absolute; top:-5px; right:-5px; background:#ef4444; color:#fff; font-size:0.65rem; font-weight:800; border-radius:10px; padding:1px 5px; min-width:16px; text-align:center;">0</span>
+                        <span id="ownerBellBadge" style="display:none; position:absolute; top:-5px; right:-5px; background:var(--red-fill); color:#fff; font-size:0.65rem; font-weight:800; border-radius:10px; padding:1px 5px; min-width:16px; text-align:center;">0</span>
                     </button>
                     <div id="ownerBellPanel" role="dialog" aria-label="Client messages" style="display:none; position:absolute; right:0; top:calc(100% + 8px); width:min(380px, calc(100vw - 24px)); max-height:70vh; overflow-y:auto; background:var(--surface-solid); border:1px solid var(--border2); border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,.55); z-index:1000;">
                         <div style="padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
@@ -1218,6 +1277,16 @@
 
             <!-- Leaderboard Table Card -->
             <div class="section-card">
+                <!-- OC:segments:START — segment tabs + per-segment KPI strip (OC-02 / OC-04) -->
+                <div class="oc-segs" role="tablist" aria-label="Customer segments">
+                    <button type="button" class="filter-select oc-seg" role="tab" aria-selected="true" data-seg="ALL" onclick="ocSeg('ALL')">All</button>
+                    <button type="button" class="filter-select oc-seg" role="tab" aria-selected="false" data-seg="hospitals" onclick="ocSeg('hospitals')">Hospitals &amp; clinics</button>
+                    <button type="button" class="filter-select oc-seg" role="tab" aria-selected="false" data-seg="specialty" onclick="ocSeg('specialty')">Specialty</button>
+                    <button type="button" class="filter-select oc-seg" role="tab" aria-selected="false" data-seg="diagnostics" onclick="ocSeg('diagnostics')">Diagnostics</button>
+                    <button type="button" class="filter-select oc-seg" role="tab" aria-selected="false" data-seg="pharmacies" onclick="ocSeg('pharmacies')">Pharmacies</button>
+                </div>
+                <div class="stats-grid oc-kpis" id="ocSegKpis" aria-live="polite"></div>
+                <!-- OC:segments:END -->
                 <div class="table-toolbar">
                     <div class="toolbar-left">
                         <div class="search-box">
@@ -1238,6 +1307,7 @@
                             <option value="ivf">IVF &amp; Fertility</option>
                             <option value="multispecialty">Multi-Specialty Hospital</option>
                             <option value="womenchild">Women &amp; Child Hospital</option>
+                            <option value="pharmacy">Pharmacy / Medical Store</option>
                         </select>
                         <select class="filter-select" id="statusFilter" onchange="filterLeaderboard()">
                             <option value="ALL">All Statuses</option>
@@ -1248,6 +1318,7 @@
                     <div style="display:flex; gap:10px;">
                         <button class="btn-primary" style="width:auto; padding:10px 18px; background:linear-gradient(135deg, var(--purple), var(--accent)); border:none;" onclick="openBroadcastModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-megaphone"/></svg> Broadcast Message</button>
                         <button class="btn-primary" style="width:auto; padding:10px 18px;" onclick="openCreateClinicModal()">+ Create Hospital / Clinic</button>
+                        <!-- OC:pharmacy-wizard:START --><button class="btn-primary" style="width:auto; padding:10px 18px;" onclick="openPharmacyWizard()">+ Create pharmacy</button><!-- OC:pharmacy-wizard:END -->
                     </div>
                 </div>
 
@@ -1651,6 +1722,14 @@
                         <button class="btn-primary" style="width:auto; padding:10px 18px;" onclick="openConnectorModal()">+ Enroll Processing Center</button>
                     </div>
                 </div>
+                <!-- CMX:START — owner master switch for every CallMedex <-> Kriya connection (migration 158) -->
+                <div class="cmx-switch" role="group" aria-labelledby="cmxSwitchTitle">
+                    <label class="cmx-row"><input type="checkbox" id="cmxSwitch" onchange="cmxToggle(this)">
+                        <span><strong id="cmxSwitchTitle">CallMedex integration</strong> <span class="cmx-pill" id="cmxPill">…</span>
+                        <span class="cmx-why">When inactive, nothing flows between CallMedex and Kriya: their report-job and booking APIs are refused, no job runs, no call or callback goes to CallMedex, and messages to the CallMedex WhatsApp number are ignored. Settings below are kept.</span>
+                        <span class="cmx-why" id="cmxMeta"></span></span></label>
+                </div>
+                <!-- CMX:END -->
                 <div style="padding:0 4px 16px; font-size:0.82rem; color:var(--text3)" id="callmedexNumberSummary">Loading CallMedex WhatsApp number...</div>
                 <div class="table-responsive">
                     <table class="custom-table">
@@ -1913,6 +1992,29 @@
                 <button class="close-btn" onclick="closeModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
             </div>
 
+            <!-- TPL:START — suggested setup for this plan; the owner ticks, nothing changes until Apply -->
+            <section class="tpl-card" id="tplCard" aria-labelledby="tplTitle" style="display:none;">
+                <div class="tpl-head">
+                    <h4 class="tpl-title" id="tplTitle">Suggested setup</h4>
+                    <span class="tpl-chip" id="tplPlan"></span>
+                </div>
+                <p class="tpl-summary" id="tplSummary"></p>
+                <div class="tpl-plan" role="group" aria-label="Change plan">
+                    <label for="tplPlanSelect" class="tpl-group" style="margin:0;">Plan</label>
+                    <select id="tplPlanSelect" class="form-control" onchange="tplPlanPreview()"></select>
+                    <span class="tpl-result" id="tplPlanHint">Pick another plan to see exactly what changes.</span>
+                </div>
+                <div id="tplPlanImpact" aria-live="polite"></div>
+                <div id="tplModules" aria-live="polite"></div>
+                <div id="tplOpd"></div>
+                <div class="tpl-actions">
+                    <button type="button" class="btn-secondary" onclick="tplSelect('recommended')">Select recommended</button>
+                    <button type="button" class="btn-primary" id="tplApplyBtn" onclick="tplApply()">Apply selected</button>
+                    <span class="tpl-result" id="tplResult" aria-live="polite"></span>
+                </div>
+            </section>
+            <!-- TPL:END -->
+
             <div class="modal-grid">
                 <div class="mini-stat">
                     <div class="stat-label">Total Appointments</div>
@@ -2045,6 +2147,37 @@
                 <div id="modalRxState" style="font-size:0.8rem; color:var(--text3); margin-top:10px;"></div>
             </div>
             <!-- RX:foundation:END -->
+            <!-- RI:START — Migration 143: Revenue Guard. Read-only over billing; needs OPD / IPD / DX / Pharmacy. -->
+            <div id="modalRiCard" style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-top:16px;">
+                <h4 style="color:var(--text); font-size:0.95rem; margin-bottom:4px;">Revenue Guard</h4>
+                <p style="color:var(--text2); font-size:0.78rem; margin-bottom:12px;">Nightly check for work done but not billed (OPD visits and orders, IPD charges, OT, pharmacy, B2B). Never writes a bill. Needs at least one of OPD, IPD, Diagnostic or Pharmacy OS.</p>
+                <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text2); cursor:pointer;">
+                    <input type="checkbox" id="modalRiToggle" onchange="toggleRi(this)">
+                    Revenue Guard enabled
+                </label>
+                <div id="modalRiState" style="font-size:0.8rem; color:var(--text2); margin-top:10px;" aria-live="polite"></div>
+            </div>
+            <!-- RI:END -->
+            <!-- MI:START — Migration 144: Switch to Kriya (data import). Owner opt-in; progress is read-only here. -->
+            <div id="modalMiCard" style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-top:16px;">
+                <h4 style="color:var(--text); font-size:0.95rem; margin-bottom:4px;">Switch to Kriya (data import)</h4>
+                <p style="color:var(--text2); font-size:0.78rem; margin-bottom:12px;">Lets the clinic admin import doctors, services, patients, history, dues and future appointments from the old software, with dry run and undo. Never sets patient consent.</p>
+                <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text2); cursor:pointer;">
+                    <input type="checkbox" id="modalMiToggle" onchange="toggleMi(this)">
+                    Data import enabled
+                </label>
+                <ol id="modalMiSteps" style="font-size:0.8rem; color:var(--text2); margin:10px 0 0 18px;" aria-live="polite"></ol>
+            </div>
+            <!-- MI:END -->
+            <!-- OC:modules:START — every module with its eligibility line, Continuous Care + Specialty OS toggles, value and go-live (OC-03, OC-06…OC-09) -->
+            <div id="modalModulesCard" style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-top:16px;">
+                <h4 style="color:var(--text); font-size:0.95rem; margin-bottom:4px;">Care &amp; specialty modules</h4>
+                <p style="color:var(--text2); font-size:0.78rem; margin-bottom:8px;">Off until you switch them on. Toggles that start patient messages ask you to type the clinic name.</p>
+                <div id="ocModules" aria-live="polite"></div>
+                <div id="ocValue" class="oc-meta" style="margin-top:10px;" aria-live="polite"></div>
+                <div id="ocOnboarding" class="oc-meta" style="margin-top:6px;" aria-live="polite"></div>
+            </div>
+            <!-- OC:modules:END -->
         </div>
     </div>
 
@@ -2072,6 +2205,42 @@
     </div>
 
     <!-- Create Clinic Admin Modal -->
+    <!-- OC:pharmacy-wizard:START — standalone pharmacy on plan `pharmacy` (migration 150; OWNER-CONSOLE.md §3) -->
+    <div class="modal-overlay" id="pharmacyWizard" role="dialog" aria-modal="true" aria-labelledby="pwTitle">
+        <div class="modal-panel" style="max-width:560px">
+            <div class="modal-header">
+                <h3 id="pwTitle" style="font-size:1.2rem; font-weight:800; color:#fff;">Create pharmacy <span id="pwStepLabel" style="color:var(--text2); font-weight:600; font-size:0.9rem;">· Step 1 of 3 · Business</span></h3>
+                <button class="close-btn" onclick="closePharmacyWizard()" aria-label="Close"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="error-msg" id="pwError" role="alert">Error</div>
+            <div id="pwStep1">
+                <div class="form-group"><label for="pwName">Legal / trade name *</label><input class="form-control" id="pwName" maxlength="120" placeholder="Sri Sai Medicals"></div>
+                <div class="form-group"><label for="pwWhatsapp">WhatsApp number (E.164) *</label><input class="form-control" id="pwWhatsapp" placeholder="+919876543210"></div>
+                <div class="form-group"><label for="pwMetaPhoneId">Meta phone number ID *</label><input class="form-control" id="pwMetaPhoneId"></div>
+                <div class="form-group"><label for="pwMetaToken">Meta access token (the store's own WABA) *</label><input class="form-control" id="pwMetaToken" type="password"></div>
+                <div class="form-group"><label for="pwMetaWaba">WhatsApp Business Account ID</label><input class="form-control" id="pwMetaWaba"></div>
+                <div class="form-group"><label for="pwGstin">GSTIN (bills become tax invoices)</label><input class="form-control" id="pwGstin" maxlength="15" placeholder="36ABCDE1234F1Z5" style="text-transform:uppercase"></div>
+                <div class="form-group"><label for="pwPhone">Shop phone</label><input class="form-control" id="pwPhone" maxlength="20"></div>
+                <div class="form-group"><label for="pwAddress">Address</label><input class="form-control" id="pwAddress" maxlength="300"></div>
+            </div>
+            <div id="pwStep2" style="display:none">
+                <p style="color:var(--text2); font-size:0.85rem; margin-bottom:10px;">One line per shop. Each shop becomes a selling store with its retail drug licence number (Drugs &amp; Cosmetics Rules 1945).</p>
+                <div id="pwShops"></div>
+                <button type="button" class="btn-secondary" onclick="addPharmacyShop()" style="width:auto; padding:8px 14px;">+ Add shop</button>
+            </div>
+            <div id="pwStep3" style="display:none">
+                <div class="form-group"><label for="pwPharmacist">Registered pharmacist on duty *</label><input class="form-control" id="pwPharmacist" maxlength="100"></div>
+                <div class="form-group"><label for="pwPharmacistReg">State Pharmacy Council registration no. *</label><input class="form-control" id="pwPharmacistReg" maxlength="60"></div>
+                <p style="color:var(--text2); font-size:0.85rem;">Pharmacy OS is switched on for this store. OPD, IPD, Diagnostic OS and Continuous Care are not available on this plan; patients are never offered doctor bookings on WhatsApp or by voice.</p>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:14px;">
+                <button type="button" class="btn-secondary" id="pwBack" onclick="pharmacyWizardStep(-1)" style="width:auto; padding:10px 18px;" disabled>Back</button>
+                <button type="button" class="btn-primary" id="pwNext" onclick="pharmacyWizardStep(1)">Next</button>
+            </div>
+        </div>
+    </div>
+    <!-- OC:pharmacy-wizard:END -->
+
     <div class="modal-overlay" id="createAdminModal">
         <div class="modal-panel" style="max-width:460px">
             <div class="modal-header">
@@ -2413,6 +2582,7 @@
                         <option value="ivf">IVF &amp; Fertility Centre — fertility treatments &amp; lab tests</option>
                         <option value="multispecialty">Multi-Specialty Hospital — departments, lab &amp; treatments catalog</option>
                         <option value="womenchild">Women &amp; Child Hospital — child care, women care &amp; fertility, with departments &amp; lab</option>
+                        <option value="pharmacy" disabled>Pharmacy / Medical Store — use “+ Create pharmacy” (stores, drug licences, pharmacist)</option>
                         <option value="polyclinic" selected>Polyclinic — multi-department hospital</option>
                         <option value="enterprise">Enterprise — large multi-branch hospital</option>
                     </select>
@@ -2518,7 +2688,10 @@
                         <p style="font-size:0.75rem; color:var(--text3); margin-top:6px;">Shown once — save it now. Password is stored only as a hash.</p>
                     </div>
                 </div>
-                <button class="btn-primary" style="margin-top:16px;" onclick="closeCreateClinicModal()">Done</button>
+                <!-- TPL:START -->
+                <button class="btn-primary" style="margin-top:16px;" onclick="tplAfterCreate()">Set up modules for this plan</button>
+                <!-- TPL:END -->
+                <button class="btn-secondary" style="margin-top:10px;" onclick="closeCreateClinicModal()">Done</button>
             </div>
         </div>
     </div>
@@ -2539,7 +2712,7 @@
 
             <!-- Tabs: Compose vs History -->
             <div style="display:flex; gap:8px; margin-bottom:20px; border-bottom:1px solid var(--border); padding-bottom:12px;">
-                <button id="tabBroadcastCompose" class="action-btn" style="background:var(--accent); color:#fff; border:none; padding:8px 16px;" onclick="switchBroadcastTab('compose')"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-pencil"/></svg> New Broadcast</button>
+                <button id="tabBroadcastCompose" class="action-btn" style="background:var(--accent-fill); color:#fff; border:none; padding:8px 16px;" onclick="switchBroadcastTab('compose')"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-pencil"/></svg> New Broadcast</button>
                 <button id="tabBroadcastHistory" class="action-btn" style="background:var(--surface2); color:var(--text2); border:1px solid var(--border); padding:8px 16px;" onclick="switchBroadcastTab('history')">Dispatch History</button>
             </div>
 
@@ -2609,8 +2782,8 @@
                 <div style="display:flex; align-items:center; gap:10px;">
                     <span style="font-size:1.4rem;"></span>
                     <div>
-                        <h3 style="font-size:1.2rem; font-weight:800; color:#ef4444;">Delete Clinic Safely</h3>
-                        <div style="font-size:0.75rem; color:var(--text3); font-weight:600; text-transform:uppercase;">Non-Destructive Soft-Delete</div>
+                        <h3 id="deleteTitle" style="font-size:1.2rem; font-weight:800; color:#ef4444;">Delete Clinic Safely</h3>
+                        <div id="deleteSubtitle" style="font-size:0.75rem; color:var(--text2); font-weight:600; text-transform:uppercase;">Non-Destructive Soft-Delete</div>
                     </div>
                 </div>
                 <button class="close-btn" onclick="closeDeleteClinicModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
@@ -2620,9 +2793,9 @@
 
             <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:var(--radius-sm); padding:14px; margin-bottom:18px;">
                 <p style="font-size:0.85rem; color:#fca5a5; line-height:1.5;">
-                    You are about to soft-delete <strong id="deleteClinicNameTarget" style="color:#fff;">Clinic</strong> (<span id="deleteClinicIdTarget" style="font-family:monospace; font-size:0.78rem;"></span>).
+                    You are about to <span id="deleteVerb">soft-delete</span> <strong id="deleteClinicNameTarget" style="color:#fff;">Clinic</strong> (<span id="deleteClinicIdTarget" style="font-family:monospace; font-size:0.78rem;"></span>).
                 </p>
-                <ul style="font-size:0.8rem; color:var(--text2); margin-top:8px; padding-left:18px; line-height:1.6;">
+                <ul id="deleteSoftList" style="font-size:0.8rem; color:var(--text2); margin-top:8px; padding-left:18px; line-height:1.6;">
                     <li>Clinic status becomes <code style="color:#f87171;">DELETED</code> and login is revoked.</li>
                     <li>WhatsApp bot routing for this tenant is disabled.</li>
                     <li><strong>Historical appointments & financial audit logs remain preserved</strong> for compliance.</li>
@@ -2641,9 +2814,15 @@
                 </div>
             </div>
 
+            <!-- TPL:START — permanent erase (migration 157) -->
+            <div class="tpl-erase" style="margin-bottom:18px;">
+                <label><input type="checkbox" id="deleteEraseToggle" checked onchange="checkDeleteConfirmInput()">
+                    <span><strong>Erase permanently</strong> — remove every patient, record, bill, message and stored file of this clinic from the database and storage. Frees space; cannot be undone. Untick to only deactivate (records kept).</span></label>
+            </div>
+            <!-- TPL:END -->
             <div class="form-group" style="margin-bottom:20px;">
                 <label style="color:#fca5a5;">Security Confirmation</label>
-                <p style="font-size:0.8rem; color:var(--text3); margin-bottom:8px;">Type <strong style="color:#fff; letter-spacing:0.5px;">CONFIRM DELETE</strong> below to proceed:</p>
+                <p style="font-size:0.8rem; color:var(--text2); margin-bottom:8px;" id="deleteConfirmHint">Type <strong style="color:#fff; letter-spacing:0.5px;">CONFIRM DELETE</strong> below to proceed:</p>
                 <input type="text" class="form-control" id="deleteConfirmInput" placeholder="CONFIRM DELETE" onkeyup="checkDeleteConfirmInput()" style="border-color:rgba(239,68,68,0.4); text-transform:uppercase;">
             </div>
 
@@ -2751,6 +2930,7 @@
                 loadClinicAdmins();
                 loadCallMedexCenters();
                 loadCallMedexNumber();
+                cmxLoad(); /* CMX */
                 loadMessagingUsage();
                 loadPricingConfig();
                 loadPlanTiers();
@@ -2784,6 +2964,7 @@
         function renderLeaderboard(clinics) {
             globalClinicsData = clinics;
             filterLeaderboard();
+            /* OC:segments */ if (!Object.keys(_ocSegOf).length) ocInit(); else ocKpis();
         }
 
         function renderBranchWatch(data) {
@@ -2869,7 +3050,7 @@
                 if (statusFilter === 'active') statusMatch = !isDormant && c.is_active;
                 if (statusFilter === 'dormant') statusMatch = isDormant || !c.is_active;
 
-                return nameMatch && planMatch && statusMatch;
+                return nameMatch && planMatch && statusMatch && /* OC:segments */ ocSegMatch(c.plan);
             });
 
             const tbody = document.getElementById('leaderboardBody');
@@ -3157,6 +3338,22 @@
                     if (rxToggle) rxToggle.checked = overrides.pharmacy_enabled === true;
                     loadRxState(c.id || _modalClinicId);
                     /* RX:foundation:END */
+                    /* RI:START */
+                    const riCard = document.getElementById('modalRiCard');
+                    if (riCard) riCard.style.display = (c.account_type || 'tenant') === 'tenant' ? '' : 'none';
+                    const riToggle = document.getElementById('modalRiToggle');
+                    if (riToggle) riToggle.checked = overrides.revenue_guard === true;
+                    loadRiState(c.id || _modalClinicId);
+                    /* RI:END */
+                    /* MI:START */
+                    const miCard = document.getElementById('modalMiCard');
+                    if (miCard) miCard.style.display = (c.account_type || 'tenant') === 'tenant' ? '' : 'none';
+                    const miToggle = document.getElementById('modalMiToggle');
+                    if (miToggle) miToggle.checked = overrides.data_import === true;
+                    loadMiState(c.id || _modalClinicId);
+                    /* MI:END */
+                    /* OC:modules:START */ _ocClinicName = c.name || ''; ocLoadModules(c.id || _modalClinicId); /* OC:modules:END */
+                    /* TPL:START */ tplLoad(c.id || _modalClinicId); /* TPL:END */
                     document.getElementById('modalTotalAppts').innerText = a.total_appointments || 0;
                     document.getElementById('modalConfirmedAppts').innerText = a.confirmed || 0;
                     document.getElementById('modalTotalPatients').innerText = a.total_patients || 0;
@@ -3346,6 +3543,275 @@
             }
         }
         /* RX:foundation:END */
+
+        /* OC:START — segments (OC-02/OC-04), modules with eligibility (OC-03/OC-06), value (OC-07), go-live (OC-08),
+           typed confirmation for patient-facing toggles (OC-09). Owner-only APIs; dark console tokens only. */
+        let _ocSeg = 'ALL', _ocSegOf = {}, _ocClinicName = '';
+        const OC_SP_KEYS = ['care_enabled', 'specialty_os', 'optical_enabled', 'dental_chart', 'derma_os', 'ivf_lab_enabled', 'obgyn_enabled', 'paediatrics_enabled'];
+        const OC_TYPED = ['care_enabled', 'ai_receptionist'];
+        function ocSegMatch(plan) { return _ocSeg === 'ALL' || (_ocSegOf[plan] || 'hospitals') === _ocSeg; }
+        function ocRs(p) { return '₹' + (Number(p || 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 }); }
+        async function ocInit() {
+            try {
+                const r = await fetch('/platform/plan-catalogue', { headers: { 'Authorization': ownerAuthHeader } });
+                if (r.ok) (await r.json()).plans.forEach(p => { _ocSegOf[p.slug] = p.segment; });
+            } catch (e) { /* the leaderboard still works; segments fall back to hospitals */ }
+            ocKpis();
+        }
+        async function ocKpis() {
+            const el = document.getElementById('ocSegKpis');
+            if (!el) return;
+            try {
+                const r = await fetch('/platform/segments/summary', { headers: { 'Authorization': ownerAuthHeader } });
+                if (!r.ok) { el.innerHTML = ''; return; }
+                const segs = (await r.json()).segments.filter(s => _ocSeg === 'ALL' || s.segment === _ocSeg);
+                const card = (label, value, meta) => `<div class="stat-card"><div class="stat-label">${escapeHtml(label)}</div><div class="stat-value">${escapeHtml(String(value))}</div><div class="stat-meta">${escapeHtml(meta)}</div></div>`;
+                el.innerHTML = segs.map(s => card(s.label, s.clinics, `${s.active} active` + (s.segment === 'pharmacies' && s.shops != null
+                    ? ` · ${s.shops} shops · ${ocRs(s.sales_today_paise)} today · ${s.open_requests} open requests`
+                    : ` · ${Object.entries(s.modules || {}).map(([k, v]) => `${k.replace('_enabled', '').replace('_', ' ')} ${v}`).join(' · ') || 'no modules on'}`))).join('');
+            } catch (e) { el.innerHTML = ''; }
+        }
+        function ocSeg(seg) {
+            _ocSeg = seg;
+            document.querySelectorAll('.oc-seg').forEach(b => b.setAttribute('aria-selected', String(b.dataset.seg === seg)));
+            filterLeaderboard();
+            ocKpis();
+        }
+        async function ocLoadModules(clinicId) {
+            const el = document.getElementById('ocModules');
+            if (!el || !clinicId) return;
+            el.innerHTML = '<span class="oc-meta">Loading…</span>';
+            try {
+                const h = { headers: { 'Authorization': ownerAuthHeader } };
+                const [m, v, o] = await Promise.all([fetch(`/platform/clinics/${clinicId}/modules`, h), fetch(`/platform/clinics/${clinicId}/value`, h), fetch(`/platform/clinics/${clinicId}/onboarding`, h)]);
+                const mods = m.ok ? (await m.json()).modules.filter(x => OC_SP_KEYS.includes(x.key)) : [];
+                el.innerHTML = mods.map(x => `<div class="oc-mod"><label><input type="checkbox" ${x.on ? 'checked' : ''} ${x.eligible || x.on ? '' : 'disabled'} onchange="ocToggle('${escapeHtml(x.key)}', this)"></label><div><div style="color:var(--text); font-size:0.85rem;">${escapeHtml(x.label)}${x.state && x.state !== 'ON' && x.state !== 'OFF' ? ` <span class="oc-meta">(${escapeHtml(x.state)})</span>` : ''}</div><div class="oc-why">${x.eligible ? (x.on ? 'On' : 'Available') : escapeHtml(x.reason || 'Not available')}${x.depends && x.depends.length ? ' · needs ' + escapeHtml(x.depends.map(d => ({ opd_enabled: 'OPD OS', specialty_os: 'Specialty OS' })[d] || d).join(', ')) : ''}</div></div></div>`).join('');
+                if (v.ok) { const d = await v.json(); document.getElementById('ocValue').textContent = `Value ${d.month}: ` + [d.ri ? `Revenue Guard ${ocRs(d.ri.recovered_paise)} recovered` : null, d.cc ? `Care ${d.cc.verified} verified (${ocRs(d.cc.verified_revenue_paise)})` : null, d.messages_sent != null ? `${d.messages_sent} messages` : null].filter(Boolean).join(' · '); }
+                if (o.ok) { const d = await o.json(); document.getElementById('ocOnboarding').textContent = `Go-live: ${d.done} of ${d.total} — ` + d.steps.map(s => `${s.done ? '✓' : '○'} ${s.label}`).join(' · '); }
+            } catch (e) { el.innerHTML = '<span class="oc-meta">Could not load modules.</span>'; }
+        }
+        async function ocToggle(key, cb) {
+            const clinicId = _modalClinicId;
+            if (cb.checked && OC_TYPED.includes(key)) {
+                const typed = (prompt(`This starts messages to ${_ocClinicName}'s patients. Type the clinic name to confirm:`) || '').trim();
+                if (typed.toLowerCase() !== (_ocClinicName || '').trim().toLowerCase()) { cb.checked = false; alert('The name did not match — nothing changed.'); return; }
+            }
+            cb.disabled = true;
+            try {
+                const res = await fetch(`/platform/clinics/${clinicId}/features`, { method: 'PATCH', headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ feature: key, enabled: cb.checked, confirm_disable: !cb.checked && confirm('Switch off? Nothing is deleted; work in progress winds down.') }) });
+                if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error((err.detail && (err.detail.message || err.detail)) || 'Could not change the module'); }
+            } catch (e) { alert(e.message); }
+            finally { cb.disabled = false; ocLoadModules(clinicId); }
+        }
+        /* OC:END */
+        /* TPL:START — suggested module template per plan (GET/POST /platform/clinics/{id}/template) */
+        let _tplClinic = null, _tplData = null;
+        const TPL_TYPED = ['care_enabled', 'ai_receptionist'];
+        const TPL_DESC = { kriya_ketu: 'Staff assistant: today\'s numbers, dues and lists on ask', ai_receptionist: 'Answers patient calls, books and reschedules',
+            corporate_health: 'Employer dashboards from employee test reports', revenue_guard: 'Nightly check for services given but not billed' };
+        function tplSplit(label) {
+            const m = String(label || '').match(/^([^(:]+?)\s*(?:\((.*)\)|:\s*(.*))$/);
+            return m ? [m[1], m[2] || m[3] || ''] : [label, ''];
+        }
+        let _tplPlanNames = {};
+        async function tplPlanOptions(current) {
+            const sel = document.getElementById('tplPlanSelect');
+            if (!Object.keys(_tplPlanNames).length) {
+                try {
+                    const r = await fetch('/platform/plan-catalogue', { headers: { 'Authorization': ownerAuthHeader } });
+                    if (r.ok) (await r.json()).plans.forEach(p => { _tplPlanNames[p.slug] = `${p.display_name}${p.segment_label ? ' · ' + p.segment_label : ''}`; });
+                } catch (e) { /* falls back to slugs */ }
+            }
+            const slugs = Object.keys(_tplPlanNames).length ? Object.keys(_tplPlanNames) : [current];
+            sel.innerHTML = slugs.map(sl => `<option value="${escapeHtml(sl)}" ${sl === current ? 'selected' : ''}>${escapeHtml(_tplPlanNames[sl] || sl)}${sl === current ? ' (current)' : ''}</option>`).join('');
+            document.getElementById('tplPlanImpact').innerHTML = '';
+        }
+        async function tplPlanPreview() {
+            const plan = document.getElementById('tplPlanSelect').value, box = document.getElementById('tplPlanImpact');
+            if (!_tplData || plan === _tplData.plan) { box.innerHTML = ''; return; }
+            box.innerHTML = '<div class="tpl-impact">Working out what changes…</div>';
+            try {
+                const r = await fetch(`/platform/clinics/${_tplClinic}/plan-change-preview?plan=${encodeURIComponent(plan)}`, { headers: { 'Authorization': ownerAuthHeader } });
+                const d = await r.json();
+                if (!r.ok) throw new Error((d.detail && (d.detail.message || d.detail)) || 'Preview failed');
+                const li = a => a.length ? '<ul>' + a.map(x => `<li>${escapeHtml(x)}</li>`).join('') + '</ul>' : ' none<br>';
+                const name = k => tplSplit((_tplData.modules.find(m => m.key === k) || {}).label || k)[0];
+                const off = d.switch_off.map(name), wd = (d.wind_down || []).map(w => name(w.key));
+                box.innerHTML = `<div class="tpl-impact"><strong>${escapeHtml(_tplPlanNames[d.from] || d.from)} → ${escapeHtml(_tplPlanNames[d.to] || d.to)}</strong><br>
+                    Modules switched off (the new plan cannot have them; nothing is deleted):${li(off)}
+                    ${wd.length ? `Still has open work, so it winds down instead of stopping: ${escapeHtml(wd.join(', '))}<br>` : ''}
+                    Plan features gained:${li(d.features_gained)}Plan features removed:${li(d.features_lost)}
+                    ${d.overrides_reset.length ? `Per-clinic feature overrides reset to the new plan: ${escapeHtml(d.overrides_reset.join(', '))}<br>` : ''}
+                    <label><input type="checkbox" id="tplPlanApplyRec" checked> Then switch on the new plan's recommended modules</label>
+                    <button type="button" class="btn-primary" style="width:auto; padding:10px 18px; min-height:44px;" onclick="tplPlanApply(${wd.length ? 'true' : 'false'})">Change plan</button></div>`;
+            } catch (e) { box.innerHTML = `<div class="tpl-impact">${escapeHtml(e.message)}</div>`; }
+        }
+        async function tplPlanApply(windDown) {
+            const plan = document.getElementById('tplPlanSelect').value, clinicId = _tplClinic;
+            const typed = (prompt(`Change ${_ocClinicName} to ${_tplPlanNames[plan] || plan}? Type the clinic name to confirm:`) || '').trim();
+            if (typed.toLowerCase() !== (_ocClinicName || '').trim().toLowerCase()) { document.getElementById('tplPlanHint').textContent = 'The name did not match — nothing changed.'; return; }
+            const body = { plan, confirm_name: typed, confirm_wind_down: windDown, apply_recommended: document.getElementById('tplPlanApplyRec').checked };
+            document.getElementById('tplPlanHint').textContent = 'Changing plan…';
+            try {
+                const r = await fetch(`/platform/clinics/${clinicId}/plan`, { method: 'PUT', headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error((d.detail && (d.detail.message || d.detail)) || 'Could not change the plan');
+                const fails = [...(d.switched_off || []), ...(d.applied || [])].filter(x => !x.ok);
+                if (_modalClinicId === clinicId) await openModal(clinicId);
+                await new Promise(res => setTimeout(res, 600));
+                document.getElementById('tplPlanHint').textContent = `Plan changed to ${_tplPlanNames[d.to] || d.to}.` + (fails.length ? ' Needs attention: ' + fails.map(f => `${f.key} (${f.error})`).join('; ') : '');
+                fetchPlatformData();
+            } catch (e) { document.getElementById('tplPlanHint').textContent = e.message; }
+        }
+        function tplRender(d) {
+            _tplData = d;
+            tplPlanOptions(d.plan);
+            document.getElementById('tplPlan').textContent = [d.plan_label, d.segment_label].filter(Boolean).join(' · ');
+            document.getElementById('tplSummary').textContent = d.summary || '';
+            const group = tier => {
+                const mods = d.modules.filter(m => m.tier === tier);
+                if (!mods.length) return '';
+                return `<div class="tpl-group">${tier === 'recommended' ? 'Recommended for this plan' : 'Optional — add if the clinic needs it'}</div><div class="tpl-grid">` + mods.map(m => {
+                    const [name, detail] = tplSplit(m.label);
+                    const stateTxt = m.on ? (m.key === 'opd_enabled' && m.state === 'CONFIGURING' ? 'SETUP' : (m.state && m.state !== 'ON' ? m.state : 'ON')) : '';
+                    const pill = m.on ? `<span class="tpl-state ${stateTxt === 'SETUP' ? 'setup' : 'on'}">${escapeHtml(stateTxt)}</span>` : '';
+                    const deps = (m.depends || []).map(x => ({ opd_enabled: 'OPD OS', specialty_os: 'Specialty OS' })[x] || x);
+                    const raw = detail || TPL_DESC[m.key] || '';
+                    const desc = raw.charAt(0).toUpperCase() + raw.slice(1);
+                    const why = m.on ? 'Already on' : escapeHtml(desc) + (!m.eligible && deps.length ? `${desc ? ' · ' : ''}turns on after ${escapeHtml(deps.join(', '))}` : '');
+                    const selectable = !m.on;
+                    return `<label class="tpl-mod ${m.on ? 'is-on' : ''} ${selectable ? '' : 'is-na'}"><input type="checkbox" data-key="${escapeHtml(m.key)}" ${m.on || (tier === 'recommended') ? 'checked' : ''} ${selectable ? '' : 'disabled'} aria-describedby="tplw-${escapeHtml(m.key)}"><span class="tpl-mod-name">${escapeHtml(name)}${pill}</span><span class="tpl-mod-why" id="tplw-${escapeHtml(m.key)}">${why}</span></label>`;
+                }).join('') + '</div>';
+            };
+            document.getElementById('tplModules').innerHTML = group('recommended') + group('optional');
+            const o = d.opd_setup, opdEl = document.getElementById('tplOpd');
+            if (o && o.state !== 'READY' && o.state !== 'DEGRADED') {
+                const pct = o.total ? Math.round(100 * o.done / o.total) : 0;
+                opdEl.innerHTML = `<div class="tpl-opd" role="status"><strong>OPD is in setup (${o.done} of ${o.total} required items).</strong> Until the clinic finishes OPD Setup and presses <em>Go live</em>, its staff see only the OPD Setup page — the queue, consultation, billing, IPD and pharmacy screens appear right after go-live.<div class="tpl-bar" aria-hidden="true"><span style="width:${pct}%"></span></div>${o.pending.length ? 'Still needed: ' + escapeHtml(o.pending.join(' · ')) : ''}</div>`;
+            } else opdEl.innerHTML = '';
+            document.getElementById('tplCard').style.display = d.modules.length ? '' : 'none';
+        }
+        async function tplLoad(clinicId) {
+            _tplClinic = clinicId;
+            document.getElementById('tplResult').textContent = '';
+            try {
+                const r = await fetch(`/platform/clinics/${clinicId}/template`, { headers: { 'Authorization': ownerAuthHeader } });
+                if (!r.ok) { document.getElementById('tplCard').style.display = 'none'; return; }
+                const d = await r.json();
+                if (_tplClinic === clinicId) tplRender(d);
+            } catch (e) { document.getElementById('tplCard').style.display = 'none'; }
+        }
+        function tplSelect(tier) {
+            if (!_tplData) return;
+            const rec = new Set(_tplData.modules.filter(m => m.tier === tier).map(m => m.key));
+            document.querySelectorAll('#tplModules input[data-key]:not(:disabled)').forEach(cb => { cb.checked = rec.has(cb.dataset.key); });
+        }
+        async function tplApply() {
+            const clinicId = _tplClinic;
+            const keys = [...document.querySelectorAll('#tplModules input[data-key]:checked:not(:disabled)')].map(cb => cb.dataset.key);
+            const out = document.getElementById('tplResult');
+            if (!keys.length) { out.textContent = 'Nothing new selected.'; return; }
+            if (keys.some(k => TPL_TYPED.includes(k))) {
+                const typed = (prompt(`Continuous Care and the AI receptionist talk to ${_ocClinicName}'s patients. Type the clinic name to confirm:`) || '').trim();
+                if (typed.toLowerCase() !== (_ocClinicName || '').trim().toLowerCase()) { out.textContent = 'The name did not match — nothing changed.'; return; }
+            }
+            const btn = document.getElementById('tplApplyBtn');
+            btn.disabled = true; out.textContent = `Switching on ${keys.length} module(s)…`;
+            try {
+                const r = await fetch(`/platform/clinics/${clinicId}/template/apply`, { method: 'POST',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' }, body: JSON.stringify({ modules: keys }) });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error((d.detail && (d.detail.message || d.detail)) || 'Could not apply the template');
+                const fails = d.results.filter(x => !x.ok);
+                if (_modalClinicId === clinicId) await openModal(clinicId);
+                out.textContent = `${d.applied} module(s) switched on.` + (fails.length ? ' Not applied: ' + fails.map(f => `${f.key.replace('_enabled', '')} (${f.error})`).join('; ') : '');
+                fetchPlatformData();
+            } catch (e) { out.textContent = e.message; }
+            finally { btn.disabled = false; }
+        }
+        function tplAfterCreate() {
+            const id = document.getElementById('ccResultClinicId').innerText.trim();
+            closeCreateClinicModal();
+            fetchPlatformData();
+            if (id) openModal(id);
+        }
+        /* TPL:END */
+        /* RI:START — Revenue Guard (migration 143): owner opt-in; the value line is the sales proof (X14: dismissed ₹ shown) */
+        function riRs(p) { return '₹' + (Number(p || 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 }); }
+        async function loadRiState(clinicId) {
+            const el = document.getElementById('modalRiState');
+            if (!el || !clinicId) return;
+            try {
+                const res = await fetch(`/platform/clinics/${clinicId}/ri/value`, { headers: { 'Authorization': ownerAuthHeader } });
+                if (!res.ok) { el.textContent = ''; return; }
+                const v = await res.json();
+                el.textContent = v.access
+                    ? `This month: ${riRs(v.flagged_paise)} flagged · ${riRs(v.recovered_paise)} recovered · ${riRs(v.dismissed_paise)} dismissed`
+                    : (v.eligible ? 'Off' : 'Off (enable OPD, IPD, Diagnostic or Pharmacy OS first)');
+            } catch (e) { el.textContent = ''; }
+        }
+        async function toggleRi(cb) {
+            const clinicId = _modalClinicId;
+            cb.disabled = true;
+            try {
+                const res = await fetch(`/platform/clinics/${clinicId}/features`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ feature: 'revenue_guard', enabled: cb.checked })
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error((err.detail && (err.detail.message || err.detail)) || 'Failed to update Revenue Guard');
+                }
+                openModal(clinicId);
+            } catch (e) {
+                alert(e.message || 'Failed to update Revenue Guard');
+                openModal(clinicId);
+            } finally {
+                cb.disabled = false;
+            }
+        }
+        /* RI:END */
+
+        /* MI:START — Switch to Kriya progress (read-only) + owner toggle */
+        async function loadMiState(clinicId) {
+            const el = document.getElementById('modalMiSteps');
+            if (!el || !clinicId) return;
+            el.textContent = '';
+            try {
+                const res = await fetch(`/platform/clinics/${clinicId}/mi/progress`, { headers: { 'Authorization': ownerAuthHeader } });
+                if (!res.ok) return;
+                const p = await res.json();
+                (p.steps || []).forEach(s => {
+                    const li = document.createElement('li');
+                    li.textContent = `${s.label}: ${s.state === 'done' ? s.rows + ' rows imported' : 'not started'}`;
+                    el.appendChild(li);
+                });
+            } catch (e) { /* the card stays empty */ }
+        }
+        async function toggleMi(cb) {
+            const clinicId = _modalClinicId;
+            cb.disabled = true;
+            try {
+                const res = await fetch(`/platform/clinics/${clinicId}/features`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ feature: 'data_import', enabled: cb.checked })
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error((err.detail && (err.detail.message || err.detail)) || 'Failed to update data import');
+                }
+                openModal(clinicId);
+            } catch (e) {
+                alert(e.message || 'Failed to update data import');
+                openModal(clinicId);
+            } finally {
+                cb.disabled = false;
+            }
+        }
+        /* MI:END */
 
         let opdDeact = { clinicId: null, checkbox: null };
         async function toggleOpd(cb) {
@@ -3738,6 +4204,85 @@
             }
         }
 
+        // ── OC:pharmacy-wizard (POST /platform/pharmacies) ──
+        let pwStep = 1;
+        const PW_LABELS = {1: 'Business', 2: 'Shops & drug licences', 3: 'Pharmacist'};
+        function openPharmacyWizard() {
+            ['pwName', 'pwWhatsapp', 'pwMetaPhoneId', 'pwMetaToken', 'pwMetaWaba', 'pwGstin', 'pwPhone', 'pwAddress',
+             'pwPharmacist', 'pwPharmacistReg'].forEach(id => { document.getElementById(id).value = ''; });
+            document.getElementById('pwShops').innerHTML = '';
+            addPharmacyShop();
+            pwStep = 1; renderPharmacyWizard();
+            document.getElementById('pharmacyWizard').classList.add('active');
+            document.getElementById('pwName').focus();
+        }
+        function closePharmacyWizard() { document.getElementById('pharmacyWizard').classList.remove('active'); }
+        function addPharmacyShop() {
+            const n = document.querySelectorAll('#pwShops .pw-shop').length + 1;
+            const row = document.createElement('div');
+            row.className = 'pw-shop';
+            row.style.cssText = 'display:flex; gap:8px; margin-bottom:8px;';
+            row.innerHTML = `<input class="form-control" aria-label="Shop ${n} name" placeholder="Shop ${n} name" maxlength="80">` +
+                `<input class="form-control" aria-label="Shop ${n} drug licence no." placeholder="Drug licence no." maxlength="60">`;
+            document.getElementById('pwShops').appendChild(row);
+        }
+        function pwError(msg) {
+            const el = document.getElementById('pwError');
+            el.innerText = msg; el.style.display = msg ? 'block' : 'none';
+        }
+        function renderPharmacyWizard() {
+            [1, 2, 3].forEach(i => { document.getElementById('pwStep' + i).style.display = i === pwStep ? 'block' : 'none'; });
+            document.getElementById('pwStepLabel').innerText = `· Step ${pwStep} of 3 · ${PW_LABELS[pwStep]}`;
+            document.getElementById('pwBack').disabled = pwStep === 1;
+            document.getElementById('pwNext').innerText = pwStep === 3 ? 'Create pharmacy' : 'Next';
+            pwError('');
+        }
+        function pwShops() {
+            return [...document.querySelectorAll('#pwShops .pw-shop')].map(r => {
+                const [a, b] = r.querySelectorAll('input');
+                return {name: a.value.trim(), drug_licence_no: b.value.trim()};
+            }).filter(s => s.name || s.drug_licence_no);
+        }
+        async function pharmacyWizardStep(dir) {
+            const v = id => document.getElementById(id).value.trim();
+            if (dir > 0 && pwStep === 1) {
+                if (!v('pwName') || !/^\+[1-9][0-9]{9,14}$/.test(v('pwWhatsapp')) || !v('pwMetaPhoneId') || v('pwMetaToken').length < 20)
+                    return pwError('Name, a WhatsApp number like +919876543210 and the store\'s own Meta credentials are required.');
+                if (v('pwGstin') && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(v('pwGstin').toUpperCase()))
+                    return pwError('That GSTIN does not look valid (15 characters, e.g. 36ABCDE1234F1Z5).');
+            }
+            if (dir > 0 && pwStep === 2) {
+                const shops = pwShops();
+                if (!shops.length || shops.some(s => s.name.length < 2 || s.drug_licence_no.length < 3))
+                    return pwError('Each shop needs a name and its drug licence number.');
+            }
+            if (dir > 0 && pwStep === 3) return submitPharmacyWizard();
+            pwStep = Math.min(3, Math.max(1, pwStep + dir)); renderPharmacyWizard();
+        }
+        async function submitPharmacyWizard() {
+            const v = id => document.getElementById(id).value.trim();
+            if (v('pwPharmacist').length < 2 || v('pwPharmacistReg').length < 3)
+                return pwError('Name the registered pharmacist and their council registration number.');
+            const body = {name: v('pwName'), whatsapp_number: v('pwWhatsapp'), meta_phone_number_id: v('pwMetaPhoneId'),
+                          meta_access_token: v('pwMetaToken'), meta_waba_id: v('pwMetaWaba') || null,
+                          gstin: v('pwGstin') ? v('pwGstin').toUpperCase() : null, hospital_phone: v('pwPhone') || null,
+                          hospital_address: v('pwAddress') || null, pharmacist_name: v('pwPharmacist'),
+                          pharmacist_registration: v('pwPharmacistReg'), shops: pwShops()};
+            const btn = document.getElementById('pwNext');
+            btn.disabled = true;
+            try {
+                const res = await fetch('/platform/pharmacies', {method: 'POST', headers: {'Authorization': ownerAuthHeader,
+                                        'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) return pwError(typeof data.detail === 'string' ? data.detail : 'Could not create the pharmacy. Check the fields.');
+                closePharmacyWizard();
+                if (typeof loadDashboard === 'function') loadDashboard();
+                alert(`Pharmacy created with ${(data.stores || []).length} store(s). Share the admin login with the owner.`);
+            } catch (e) {
+                pwError('Network error — nothing was created. Try again.');
+            } finally { btn.disabled = false; }
+        }
+
         function closeCreateAdminModal() {
             document.getElementById('createAdminModal').classList.remove('active');
         }
@@ -3796,6 +4341,38 @@
             }
         }
 
+        /* CMX:START — owner master switch (GET/PUT /platform/callmedex/status) */
+        function cmxRender(d) {
+            const cb = document.getElementById('cmxSwitch'), pill = document.getElementById('cmxPill');
+            cb.checked = !!d.enabled;
+            pill.textContent = d.enabled ? 'ACTIVE' : 'INACTIVE';
+            pill.className = 'cmx-pill ' + (d.enabled ? 'on' : 'off');
+            document.getElementById('cmxMeta').textContent = d.updated_at
+                ? `Last changed ${new Date(d.updated_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST by ${d.updated_by || 'owner'}` : '';
+        }
+        async function cmxLoad() {
+            try {
+                const r = await fetch('/platform/callmedex/status', { headers: { 'Authorization': ownerAuthHeader } });
+                if (r.ok) cmxRender(await r.json());
+                else document.getElementById('cmxPill').textContent = 'UNKNOWN';
+            } catch (e) { document.getElementById('cmxPill').textContent = 'UNKNOWN'; }
+        }
+        async function cmxToggle(cb) {
+            const on = cb.checked;
+            if (!confirm(on ? 'Activate the CallMedex integration? CallMedex can send report jobs and bookings, and Kriya will message patients from the CallMedex number.'
+                            : 'Deactivate the CallMedex integration? Every connection between CallMedex and Kriya stops until you activate it again. Nothing is deleted.')) {
+                cb.checked = !on; return;
+            }
+            cb.disabled = true;
+            try {
+                const r = await fetch('/platform/callmedex/status', { method: 'PUT', headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.detail || 'Could not change the switch');
+                cmxRender(d);
+            } catch (e) { alert(e.message); cmxLoad(); }
+            finally { cb.disabled = false; }
+        }
+        /* CMX:END */
         // ═══ CallMedex Processing Centers ═══
 
         async function loadCallMedexNumber() {
@@ -5271,7 +5848,7 @@
                     <button type="button" onclick="openFromOwnerBell('${escapeHtml(m.id)}')" style="text-align:left; background:${m.owner_seen_at ? 'var(--surface2)' : 'rgba(61,139,253,.14)'}; border:1px solid ${m.owner_seen_at ? 'var(--border)' : 'rgba(61,139,253,.45)'}; border-radius:10px; padding:10px 12px; cursor:pointer; color:var(--text); width:100%;">
                         <div style="display:flex; justify-content:space-between; gap:8px; font-size:0.78rem; color:var(--text3);">
                             <span>${escapeHtml(m.clinic_name || 'Unknown clinic')} · ${escapeHtml(SUPPORT_TYPE_LABELS[m.category] || m.category)}</span>
-                            ${m.owner_seen_at ? '' : '<span style="background:var(--accent); color:#fff; font-weight:700; padding:0 6px; border-radius:8px;">NEW</span>'}
+                            ${m.owner_seen_at ? '' : '<span style="background:var(--accent-fill); color:#fff; font-weight:700; padding:0 6px; border-radius:8px;">NEW</span>'}
                         </div>
                         <div style="font-weight:700; font-size:0.88rem; margin-top:3px;">${escapeHtml(m.subject)}</div>
                         <div style="font-size:0.8rem; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.message)}</div>
@@ -6397,6 +6974,8 @@
             document.getElementById('deleteClinicIdTarget').innerText = clinicId;
             document.getElementById('deleteConfirmInput').value = '';
             document.getElementById('deleteClinicError').style.display = 'none';
+            document.getElementById('deleteEraseToggle').checked = true; /* TPL */
+            checkDeleteConfirmInput(); /* TPL */
 
             const confirmBtn = document.getElementById('deleteClinicConfirmBtn');
             confirmBtn.disabled = true;
@@ -6435,9 +7014,26 @@
         }
 
         function checkDeleteConfirmInput() {
-            const inputVal = document.getElementById('deleteConfirmInput').value.trim().toUpperCase();
+            const raw = document.getElementById('deleteConfirmInput').value.trim();
+            const inputVal = raw.toUpperCase();
             const confirmBtn = document.getElementById('deleteClinicConfirmBtn');
-            if (inputVal === 'CONFIRM DELETE') {
+            /* TPL:START */
+            const erase = document.getElementById('deleteEraseToggle').checked;
+            const input = document.getElementById('deleteConfirmInput');
+            input.style.textTransform = erase ? 'none' : 'uppercase';
+            input.placeholder = erase ? (currentDeleteClinicName || 'Clinic name') : 'CONFIRM DELETE';
+            document.getElementById('deleteConfirmHint').innerHTML = erase
+                ? `Type the clinic name <strong style="color:#fff;">${escapeHtml(currentDeleteClinicName || '')}</strong> to erase it permanently:`
+                : 'Type <strong style="color:#fff; letter-spacing:0.5px;">CONFIRM DELETE</strong> below to proceed:';
+            confirmBtn.innerText = erase ? 'Erase permanently' : 'Confirm Soft-Delete';
+            document.getElementById('deleteTitle').textContent = erase ? 'Erase Clinic Permanently' : 'Delete Clinic Safely';
+            document.getElementById('deleteSubtitle').textContent = erase ? 'All data and files removed' : 'Non-Destructive Soft-Delete';
+            document.getElementById('deleteVerb').textContent = erase ? 'permanently erase' : 'soft-delete';
+            document.getElementById('deleteSoftList').style.display = erase ? 'none' : '';
+            const ok = erase ? raw.toLowerCase() === (currentDeleteClinicName || '').trim().toLowerCase() && raw.length > 0
+                             : inputVal === 'CONFIRM DELETE';
+            /* TPL:END */
+            if (ok) {
                 confirmBtn.disabled = false;
                 confirmBtn.style.opacity = '1';
                 confirmBtn.style.cursor = 'pointer';
@@ -6455,28 +7051,33 @@
             errEl.style.display = 'none';
 
             const confirmBtn = document.getElementById('deleteClinicConfirmBtn');
+            const erase = document.getElementById('deleteEraseToggle').checked; /* TPL */
+            const resetLabel = erase ? 'Erase permanently' : 'Confirm Soft-Delete';
             confirmBtn.disabled = true;
-            confirmBtn.innerText = 'Deleting...';
+            confirmBtn.innerText = erase ? 'Erasing…' : 'Deleting...';
 
             const targetId = currentDeleteClinicId;
             const targetName = currentDeleteClinicName;
+            const qs = erase ? `?erase=true&confirm_name=${encodeURIComponent(document.getElementById('deleteConfirmInput').value.trim())}` : '';
 
             try {
-                const res = await fetch(`/platform/clinics/${targetId}`, {
+                const res = await fetch(`/platform/clinics/${targetId}${qs}`, {
                     method: 'DELETE',
                     headers: { 'Authorization': ownerAuthHeader }
                 });
                 const data = await res.json();
 
                 if (!res.ok) {
-                    errEl.innerText = data.detail || 'Failed to delete clinic.';
+                    errEl.innerText = (data.detail && (data.detail.message || data.detail)) || 'Failed to delete clinic.';
                     errEl.style.display = 'block';
                     confirmBtn.disabled = false;
-                    confirmBtn.innerText = 'Confirm Soft-Delete';
+                    confirmBtn.innerText = resetLabel;
                     return;
                 }
 
                 closeDeleteClinicModal();
+                if (data.erased) alert(`${targetName} was erased permanently: ${data.rows_removed} rows and ${data.files_removed} files removed.`
+                    + (data.storage_ok ? '' : '\nSome stored files could not be removed; they are no longer linked to anything.'));
 
                 // Optimistic UI update: filter out the deleted clinic from local array and re-render
                 globalClinicsData = globalClinicsData.filter(c => c.id !== targetId);
@@ -6489,7 +7090,7 @@
                 errEl.innerText = 'Network error while deleting clinic.';
                 errEl.style.display = 'block';
                 confirmBtn.disabled = false;
-                confirmBtn.innerText = 'Confirm Soft-Delete';
+                confirmBtn.innerText = resetLabel;
             }
         }
     </script>

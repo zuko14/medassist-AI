@@ -42,7 +42,7 @@ G13, which extend existing objects additively.
 | G27 | Home delivery logistics | home collection exists for lab (`home_collection.py`) | **pickup only in v1** (owner O-6) | RX-D4 | — |
 | G28 | Cold-chain temperature logging | none | **out of v1** (flag on item only; manual fridge log) | RX-D5 | — |
 | G29 | Drug–drug interaction checking at dispense | none | **out of v1 by design** — clinical decision support belongs to the prescriber's OPD/IPD workflow, not the counter; adding it to pharmacy would put clinical judgement in a non-clinician flow (ADR-RX-06) | — | — |
-| G30 | Standalone retail pharmacy (no OPD) | eligibility requires OPD (ADR-RX-09) | **out of v1** — needs patient registry, shifts and counters without OPD | RX-D6 | — |
+| G30 | Standalone retail pharmacy (no OPD) | eligibility requires OPD (ADR-RX-09) | **out of v1** — needs patient registry, shifts and counters without OPD; plan: [RETAIL-PLAN.md](RETAIL-PLAN.md) | RX-D6 | — |
 
 ## 3. Risks introduced by closing the gaps
 | Risk | Mitigation |

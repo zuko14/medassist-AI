@@ -1,0 +1,58 @@
+{
+ "pack": "eye_anti_vegf",
+ "cases": [
+  {
+   "name": "injection missed past grace",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "next_injection_on": "d:-4"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "injection_missed"
+    ]
+   }
+  },
+  {
+   "name": "within grace",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "next_injection_on": "d:-3"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "attended",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "next_injection_on": "d:-10"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  }
+ ]
+}

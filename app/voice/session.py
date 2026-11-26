@@ -45,7 +45,9 @@ _SUCCESS = {"booked", "payment_link_sent", "answered", "report_sent", "cancelled
             "rescheduled", "callback_requested", "status_told", "none", "not_ready", "nothing_to_change",
             "reminder_confirmed", "reminder_cant_come",
             # session 56: the person's wish about the call itself, honoured
-            "do_not_call", "wrong_number", "call_later", "reminder_running_late", "not_offered"}
+            "do_not_call", "wrong_number", "call_later", "reminder_running_late", "not_offered",
+            # Continuous Care check-in (ADR-CC-16)
+            "care_answered", "care_partial"}
 
 
 def _plain_name(raw) -> Optional[str]:
@@ -175,13 +177,17 @@ class CallSession:
     # ---- API ----
 
     async def start(self, outbound: bool = False, interest: Optional[str] = None,
-                    reminder: Optional[dict] = None) -> Reply:
+                    reminder: Optional[dict] = None, care: Optional[dict] = None) -> Reply:
         await store.update_call(self.ctx.clinic_id, self.ctx.call_id, {"versions": VERSIONS})
         scope = await self._ensure_scope()
         await self._event("system", "CALL_STARTED", status="ok", data={"mode": self.ctx.mode, "scope": scope.kind})
         preload = getattr(self.tools, "preload_knowledge", None)
         if preload:
             preload()
+        if outbound and care:
+            # Continuous Care check-in: the care script only (its own branch; reminder / lead below unchanged)
+            return await self._emit(self.engine.greeting(self.state, care={
+                **care, "first_name": _plain_name(care.get("first_name"))}))
         if outbound and reminder:
             # The appointment's own patient name (a family member's booking is named right).
             appt = {**reminder, "patient_name": _plain_name(reminder.get("patient_name"))}

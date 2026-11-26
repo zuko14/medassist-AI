@@ -195,6 +195,68 @@ async def platform_create_clinic(
     return result
 
 
+# ── Standalone pharmacy onboarding (lane RXR, migration 150; docs/specialty-os/OWNER-CONSOLE.md §3) ──
+
+class PharmacyShopIn(BaseModel):
+    model_config = {"extra": "forbid"}
+    name: str = Field(..., min_length=2, max_length=80)
+    drug_licence_no: str = Field(..., min_length=3, max_length=60)
+
+
+class PharmacyCreateIn(BaseModel):
+    """The 3-step pharmacy wizard: business (name, WhatsApp, GSTIN), shops (drug licence per shop), pharmacist."""
+    model_config = {"extra": "forbid"}
+    name: str = Field(..., min_length=2, max_length=120)
+    whatsapp_number: str = Field(..., pattern=r"^\+[1-9][0-9]{9,14}$")
+    meta_phone_number_id: str = Field(..., min_length=5, max_length=40)
+    meta_access_token: str = Field(..., min_length=20, max_length=600)
+    meta_waba_id: Optional[str] = Field(None, max_length=40)
+    gstin: Optional[str] = Field(None, pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$")
+    pharmacist_name: str = Field(..., min_length=2, max_length=100)
+    pharmacist_registration: str = Field(..., min_length=3, max_length=60)
+    hospital_phone: Optional[str] = Field(None, max_length=20)
+    hospital_address: Optional[str] = Field(None, max_length=300)
+    shops: list[PharmacyShopIn] = Field(..., min_length=1, max_length=20)
+
+
+@router.post("/pharmacies", status_code=201)
+async def platform_create_pharmacy(body: PharmacyCreateIn, request: Request,
+                                   owner: AdminUser = Depends(verify_owner_credentials)):
+    """A medical store / chain on plan `pharmacy`: the clinic row (same provisioning as every plan, incl. the admin
+    login), Pharmacy OS switched on (rx_eligible holds for this plan without OPD), one retail store per shop with its
+    drug licence, the GSTIN and the pharmacist on duty (Drugs & Cosmetics Rules 1945). No doctor, no booking."""
+    from app.services import rx
+    from app.services.tenant import invalidate_tenant_cache
+    result = await provision_clinic(CreateClinicRequest(
+        name=body.name, whatsapp_number=body.whatsapp_number, plan="pharmacy",
+        meta_phone_number_id=body.meta_phone_number_id, meta_access_token=body.meta_access_token,
+        meta_waba_id=body.meta_waba_id, hospital_phone=body.hospital_phone, hospital_address=body.hospital_address))
+    clinic = result.get("clinic") or {}
+    cid = clinic.get("id")
+    if not cid:
+        raise HTTPException(status_code=500, detail="The pharmacy could not be created.")
+    stores = []
+    for n, shop in enumerate(body.shops, start=1):
+        stores.append(await rx.create_or_update_store(cid, {
+            "code": f"SHOP{n}", "name": shop.name.strip(), "store_type": "retail_counter", "can_sell": True,
+            "can_receive_grn": True, "drug_licence_no": shop.drug_licence_no.strip()}))
+    cur = (await sb(supabase.table("clinics").select("features, opd_settings, rx_settings").eq("id", cid).limit(1))).data
+    row = (cur or [{}])[0]
+    feats = {**(row.get("features") or {}), "pharmacy_enabled": True}
+    patch = {"features": feats, "rx_state": "ACTIVE",
+             "rx_settings": {**(row.get("rx_settings") or {}), "pharmacist_name": body.pharmacist_name.strip(),
+                             "pharmacist_registration": body.pharmacist_registration.strip()}}
+    if body.gstin:
+        patch["opd_settings"] = {**(row.get("opd_settings") or {}), "gstin": body.gstin}
+    # unscoped: platform_admin
+    await sb(supabase.table("clinics").update(patch).eq("id", cid))
+    invalidate_tenant_cache()
+    await log_admin_action(user=owner, action="create_pharmacy", resource_type="clinic", resource_id=cid,
+                           details={"name": body.name, "shops": len(stores)},
+                           ip_address=request.client.host if request.client else "unknown")
+    return {**result, "stores": stores}
+
+
 class ClinicAdminCreate(BaseModel):
     clinic_id: Optional[str] = None  # None = platform-level (no clinic) account
     username: str = Field(..., min_length=3)
@@ -386,6 +448,7 @@ async def get_platform_overview(
             "derma": 0,
             "multispecialty": 0,
             "womenchild": 0,
+            "pharmacy": 0,
             "eye": 0,
             "dental": 0,
             "ivf": 0,
@@ -887,6 +950,7 @@ async def update_clinic_feature(
         ALL_FEATURES,
         CORPORATE_HEALTH_PLANS,
         OPT_IN_FEATURES,
+        PHARMACY_PLANS,
         invalidate_tenant_cache,
     )
 
@@ -912,9 +976,15 @@ async def update_clinic_feature(
                                                     "disabling OPD OS: inpatient billing runs through OPD.")
     # Pharmacy OS runs on the OPD registry, shifts and counters (ADR-RX-09, VERIFICATION D7).
     if (body.feature == "opd_enabled" and body.enabled is not True
+            and clinic_res.data[0].get("plan") not in PHARMACY_PLANS
             and (clinic_res.data[0].get("rx_state") or "OFF") != "OFF"):
         raise HTTPException(status_code=409, detail="Switch Pharmacy OS off (and let it finish winding down) "
                                                     "before disabling OPD OS: the pharmacy runs on OPD.")
+    # Continuous Care runs on the OPD registry, signed prescriptions and bookings (ADR-CC-01).
+    if (body.feature == "opd_enabled" and body.enabled is not True
+            and (clinic_res.data[0].get("cc_state") or "OFF") != "OFF"):
+        raise HTTPException(status_code=409, detail="Switch Continuous Care off (and let it finish winding down) "
+                                                    "before disabling OPD OS: care plans come from OPD prescriptions.")
     if (body.feature == "ai_receptionist" and body.enabled
             and (clinic_res.data[0].get("account_type") or "tenant") != "tenant"):
         raise HTTPException(
@@ -1037,6 +1107,56 @@ async def update_clinic_feature(
                     "preview": preview})
             clinic_update_fields["rx_state"] = "WIND_DOWN" if preview["blocking"] else "OFF"
 
+    if body.feature == "care_enabled":
+        # ADR-CC-01: disabling never deletes. With active enrollments it needs confirmation and enters WIND_DOWN
+        # (no new enrollments or cards; one "service ended" message; open cases can still be closed); OFF when none.
+        from app.services import cc
+        from app.services.tenant import care_eligible
+        if body.enabled:
+            if not care_eligible({**clinic_res.data[0], "features": features}):
+                raise HTTPException(status_code=400, detail={"code": "care_requires_opd",
+                                                             "message": "Enable OPD OS for this clinic before Continuous Care."})
+            clinic_update_fields["cc_state"] = "ACTIVE"
+        else:
+            preview = await cc.deactivation_preview(clinic_id)
+            if preview["blocking"] and not body.confirm_disable:
+                raise HTTPException(status_code=409, detail={
+                    "message": "Patients are enrolled in care. Confirm to stop new enrollments and cards; each "
+                               "enrolled patient gets one 'programme ended' message and open cases can still be "
+                               "closed (wind-down). Nothing is deleted.", "preview": preview})
+            clinic_update_fields["cc_state"] = "WIND_DOWN" if preview["blocking"] else "OFF"
+            if preview["blocking"]:
+                from app.services import cc_channels
+                try:
+                    await cc_channels.send_service_ended({**clinic_res.data[0], "features": features})
+                except Exception as e:
+                    logger.error(f"CC service-ended messages failed clinic={clinic_id}: {type(e).__name__}")
+
+    # Specialty OS (migrations 151–155): plan-eligible owner opt-in; a pack needs the shared block first. Switching
+    # off never deletes (forms, photos, packages stay readable to nobody until switched on again or purged).
+    from app.services.tenant import SP_PACKS, sp_eligible
+    sp_flags = {flag: pack for pack, (flag, _) in SP_PACKS.items()}
+    if body.enabled and (body.feature == "specialty_os" or body.feature in sp_flags):
+        trial = {**clinic_res.data[0], "features": features}
+        if not sp_eligible(trial):
+            raise HTTPException(status_code=400, detail={"code": "sp_not_eligible", "message":
+                                "Specialty OS needs OPD OS on a specialty, multi-specialty, women & child or "
+                                "enterprise plan."})
+        if body.feature in sp_flags:
+            if features.get("specialty_os") is not True:
+                raise HTTPException(status_code=400, detail={"code": "sp_requires_shared", "message":
+                                    "Switch on Specialty OS for this clinic first."})
+            if not sp_eligible(trial, sp_flags[body.feature]):
+                raise HTTPException(status_code=400, detail={"code": "sp_pack_not_eligible", "message":
+                                    "This specialty module is not available on this clinic's plan."})
+
+    if body.feature == "revenue_guard" and body.enabled:
+        # Read-only over billing: needs at least one billing module (OPD / IPD / DX / RX) to read.
+        from app.services.tenant import ri_eligible
+        if not ri_eligible({**clinic_res.data[0], "features": features}):
+            raise HTTPException(status_code=400, detail="Revenue Guard reads OPD, IPD, Diagnostic or Pharmacy "
+                                                        "billing: enable one of them for this clinic first.")
+
     result = (
         # unscoped: platform super-admin updating feature flags for specified clinic_id
         await sb(supabase.table("clinics")
@@ -1107,6 +1227,501 @@ async def get_rx_deactivation_preview(
     clinic = res.data[0]
     return {**await rx.deactivation_preview(clinic_id), "state": clinic.get("rx_state") or "OFF",
             "access": rx_access(clinic), "eligible": rx_eligible(clinic)}
+
+
+class CareLimitBody(BaseModel):
+    care_message_limit: int = Field(..., ge=0, le=1_000_000)
+
+
+@router.put("/clinics/{clinic_id}/care-limit")
+async def put_care_limit(
+    clinic_id: str,
+    body: CareLimitBody,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Monthly 'care' message quota (clinic_message_quota_usage kind 'care', ADR-CC-10); dental kinds untouched."""
+    from app.services.tenant import invalidate_tenant_cache
+    # unscoped: platform_admin
+    res = await sb(supabase.table("clinics").select("id, config").eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    cfg = dict(res.data[0].get("config") or {})
+    limits = dict(cfg.get("dental_message_limits") or {})
+    before = limits.get("care")
+    limits["care"] = body.care_message_limit
+    cfg["dental_message_limits"] = limits
+    # unscoped: platform_admin
+    await sb(supabase.table("clinics").update({"config": cfg}).eq("id", clinic_id))
+    invalidate_tenant_cache()
+    await log_admin_action(user=owner, action="care_limit", resource_type="clinic", resource_id=clinic_id,
+                           details={"before": before, "after": body.care_message_limit},
+                           ip_address=request.client.host if request.client else "unknown")
+    return {"care_message_limit": body.care_message_limit}
+
+
+@router.get("/cc/overview")
+async def get_cc_overview(owner: AdminUser = Depends(verify_owner_credentials)):
+    """Per clinic with Continuous Care: state, active enrollments, prompts this month, answered %, template share."""
+    from app.services.tenant import care_access
+    from app.utils.helpers import today_ist
+    # unscoped: platform_admin
+    res = await sb(supabase.table("clinics").select("*").neq("cc_state", "OFF"))
+    start = today_ist().replace(day=1).isoformat()
+    out = []
+    for c in res.data or []:
+        cid = c["id"]
+        # unscoped: platform_admin
+        enr = await sb(supabase.table("cc_enrollments").select("id").eq("clinic_id", cid).eq("status", "active"))
+        # unscoped: platform_admin
+        pr = await sb(supabase.table("cc_prompts").select("status, channel").eq("clinic_id", cid).gte("created_at", start))
+        prompts = pr.data or []
+        sent = [p for p in prompts if p["status"] not in ("queued", "failed")]
+        out.append({"clinic_id": cid, "name": c.get("name"), "state": c.get("cc_state"), "access": care_access(c),
+                    "active_enrollments": len(enr.data or []), "prompts_month": len(sent),
+                    "answered_pct": round(100 * sum(1 for p in prompts if p["status"] == "answered") / len(sent)) if sent else None,
+                    "template_share_pct": round(100 * sum(1 for p in sent if p["channel"] == "whatsapp_template") / len(sent))
+                    if sent else None,
+                    "quality": ((c.get("cc_settings") or {}).get("wa_health") or {}).get("quality")})
+    return {"clinics": out}
+
+
+@router.get("/clinics/{clinic_id}/mi/progress")
+async def get_mi_progress(
+    clinic_id: str,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Read-only 'Switch to Kriya' stepper for the owner console / onboarding team (UI spec §7.8)."""
+    from app.services import data_import
+    from app.services.tenant import mi_access
+    # unscoped: platform_admin
+    res = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    on = mi_access(res.data[0])
+    return {"access": on, "steps": await data_import.progress(clinic_id) if on else []}
+
+
+@router.get("/clinics/{clinic_id}/ri/value")
+async def get_ri_value(
+    clinic_id: str,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Revenue Guard sales proof for the owner console: ₹ flagged / recovered / dismissed this month (X14)."""
+    from app.services import revenue_guard
+    from app.services.tenant import ri_access, ri_eligible
+    # unscoped: platform_admin
+    res = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    clinic = res.data[0]
+    on = ri_access(clinic)
+    return {"access": on, "eligible": ri_eligible(clinic),
+            **(await revenue_guard.month_value(clinic_id) if on else
+               {"flagged_paise": 0, "recovered_paise": 0, "dismissed_paise": 0})}
+
+
+# ── Owner console: plan catalogue, segments, modules, value, onboarding (OC-02…OC-08; OWNER-CONSOLE.md §4) ──
+
+def _module_rows(clinic: dict) -> list[dict]:
+    """Every module: state, eligible, reason, dependencies — the eligibility line under each owner toggle (OC-03)."""
+    from app.services.tenant import (CORPORATE_HEALTH_PLANS, OPT_IN_FEATURES, SP_PACKS, care_eligible, dx_eligible,
+                                     ipd_eligible, opd_eligible, rx_eligible, sp_access, sp_eligible)
+    feats = clinic.get("features") or {}
+    tenant = (clinic.get("account_type") or "tenant") == "tenant"
+
+    def row(key, eligible, reason, depends=(), state=None):
+        on = feats.get(key) is True
+        return {"key": key, "label": OPT_IN_FEATURES.get(key, key), "on": on,
+                "state": state or ("ON" if on else "OFF"), "eligible": bool(eligible),
+                "reason": None if eligible else reason, "depends": list(depends)}
+
+    out = [row("opd_enabled", opd_eligible(clinic), "Needs a clinic / hospital plan with consultation booking.",
+               state=clinic.get("opd_state")),
+           row("ipd_enabled", ipd_eligible(clinic), "Enable OPD OS first.", ("opd_enabled",), clinic.get("ipd_state")),
+           row("dx_enabled", dx_eligible(clinic), "Needs a plan with lab test booking or lab reports.",
+               state=clinic.get("dx_state")),
+           row("pharmacy_enabled", rx_eligible(clinic), "Enable OPD OS first (or use the pharmacy plan).",
+               ("opd_enabled",), clinic.get("rx_state")),
+           row("care_enabled", care_eligible(clinic), "Enable OPD OS first.", ("opd_enabled",), clinic.get("cc_state")),
+           row("revenue_guard", tenant and any(feats.get(k) is True for k in ("opd_enabled", "dx_enabled", "pharmacy_enabled")),
+               "Needs OPD, IPD, Diagnostic or Pharmacy billing.", ("opd_enabled",)),
+           row("data_import", tenant, "Hospital / clinic tenants only."),
+           row("kriya_ketu", tenant, "Hospital / clinic tenants only."),
+           row("ai_receptionist", tenant, "Hospital / clinic tenants only."),
+           row("specialty_os", sp_eligible(clinic), "Needs OPD OS on a specialty, multi-specialty, women & child or "
+                                                    "enterprise plan.", ("opd_enabled",)),
+           row("corporate_health", tenant and clinic.get("plan") in CORPORATE_HEALTH_PLANS,
+               "Diagnostic plans only.")]
+    for pack, (flag, plans) in SP_PACKS.items():
+        out.append(row(flag, sp_eligible(clinic, pack) and sp_access(clinic),
+                       ("Switch on Specialty OS first." if sp_eligible(clinic, pack) else
+                        f"Available on plans: {', '.join(sorted(plans))}."), ("specialty_os",)))
+    return out
+
+
+@router.get("/plan-catalogue")
+async def plan_catalogue(owner: AdminUser = Depends(verify_owner_credentials)):
+    """Slugs, display names, segment, feature labels and default message quota (OC-02)."""
+    from app.services.tenant import FEATURE_LABELS, PLAN_FEATURES, SEGMENT_BY_PLAN, SEGMENT_LABELS
+    # unscoped: platform_admin
+    tiers = {t["plan_name"]: t for t in ((await sb(supabase.table("plan_tiers").select("*"))).data or [])}
+    out = []
+    for slug, feats in PLAN_FEATURES.items():
+        t = tiers.get(slug) or {}
+        out.append({"slug": slug, "display_name": t.get("display_name") or slug, "segment": SEGMENT_BY_PLAN.get(slug),
+                    "segment_label": SEGMENT_LABELS.get(SEGMENT_BY_PLAN.get(slug), ""),
+                    "features": ["All features"] if "*" in feats else sorted(FEATURE_LABELS.get(f, f) for f in feats),
+                    "included_messages_month": t.get("included_messages_month")})
+    return {"plans": out, "segments": SEGMENT_LABELS}
+
+
+@router.get("/segments/summary")
+async def segments_summary(owner: AdminUser = Depends(verify_owner_credentials)):
+    """KPI strip per segment (OC-04): clinics, active, module adoption; pharmacies add shops, today's sales and open
+    order requests (read only, one query per table)."""
+    from app.services.tenant import SEGMENT_BY_PLAN, SEGMENT_LABELS
+    from app.utils.helpers import today_ist
+    from app.database import fetch_all
+    # unscoped: platform_admin  (paginated: PostgREST caps one response at max-rows)
+    clinics = await fetch_all(lambda: supabase.table("clinics").select("id, plan, is_active, status, features")
+                              .eq("account_type", "tenant").order("id"), label="platform:segments")
+    clinics = [c for c in clinics if c.get("status") != "DELETED"]
+    seg = {k: {"segment": k, "label": v, "clinics": 0, "active": 0, "modules": {}} for k, v in SEGMENT_LABELS.items()}
+    ids_by_seg: dict[str, set] = {k: set() for k in SEGMENT_LABELS}
+    for c in clinics:
+        s = SEGMENT_BY_PLAN.get(c.get("plan"), "hospitals")
+        seg[s]["clinics"] += 1
+        seg[s]["active"] += 1 if c.get("is_active") else 0
+        ids_by_seg[s].add(c["id"])
+        for k, v in (c.get("features") or {}).items():
+            if v is True and k in ("opd_enabled", "ipd_enabled", "dx_enabled", "pharmacy_enabled", "care_enabled",
+                                   "revenue_guard", "specialty_os"):
+                seg[s]["modules"][k] = seg[s]["modules"].get(k, 0) + 1
+    ph = list(ids_by_seg["pharmacies"])        # empty list → IN () matches no row (never a widened query)
+    try:
+        # unscoped: platform_admin
+        stores = (await sb(supabase.table("rx_stores").select("id", count="exact").in_("clinic_id", ph).limit(1))).count
+        # unscoped: platform_admin  (shortcut: one IN list of pharmacy ids; batch it past ~500 pharmacies)
+        sales = await fetch_all(lambda: supabase.table("rx_sales").select("id, net_paise").in_("clinic_id", ph)
+                                .eq("status", "completed").gte("completed_at", today_ist().isoformat()).order("id"),
+                                label="platform:segments:sales")
+        # unscoped: platform_admin
+        reqs = (await sb(supabase.table("pharmacy_order_requests").select("id", count="exact").in_("clinic_id", ph)
+                         .in_("status", ["new", "reviewing", "ready"]).limit(1))).count
+        seg["pharmacies"].update({"shops": stores or 0, "sales_today_paise": sum(int(x.get("net_paise") or 0)
+                                                                                for x in sales),
+                                  "open_requests": reqs or 0})
+    except Exception as e:                     # noqa: BLE001 - the strip still shows the counts
+        logger.warning(f"segments: pharmacy KPIs skipped: {type(e).__name__}")
+    return {"segments": list(seg.values())}
+
+
+@router.get("/clinics/{clinic_id}/modules")
+async def clinic_modules(clinic_id: str, owner: AdminUser = Depends(verify_owner_credentials)):
+    # unscoped: platform_admin
+    res = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    return {"modules": _module_rows(res.data[0])}
+
+
+async def _template_view(clinic: dict) -> dict:
+    """The plan's suggested modules (recommended / optional) with live state and eligibility, plus OPD go-live
+    progress: OPD stays CONFIGURING — clinic staff see only OPD Setup — until every blocking item is done."""
+    from app.services.tenant import PLAN_MODULE_TEMPLATES, SEGMENT_BY_PLAN, SEGMENT_LABELS
+    plan = clinic.get("plan") or "soloclinic"
+    tpl = PLAN_MODULE_TEMPLATES.get(plan) or {"summary": "", "recommended": (), "optional": ()}
+    rows = {r["key"]: r for r in _module_rows(clinic)}
+    mods = [{**rows[k], "tier": tier} for tier in ("recommended", "optional") for k in tpl[tier] if k in rows]
+    # unscoped: platform_admin - plan display name (shared catalogue, no clinic_id)
+    tier_row = (await sb(supabase.table("plan_tiers").select("display_name").eq("plan_name", plan).limit(1))).data
+    opd_setup = None
+    if (clinic.get("features") or {}).get("opd_enabled") is True:
+        try:
+            from app.services import opd
+            items = await opd.setup_checklist(clinic)
+            blocking = [i for i in items if i.get("blocking")]
+            opd_setup = {"state": clinic.get("opd_state"), "done": sum(1 for i in blocking if i.get("done")),
+                         "total": len(blocking),
+                         "pending": [i.get("label") for i in blocking if not i.get("done")]}
+        except Exception as e:  # noqa: BLE001 - the template still renders without the checklist
+            logger.warning(f"template: OPD checklist skipped clinic={clinic.get('id')}: {type(e).__name__}")
+    return {"clinic_id": clinic.get("id"), "clinic_name": clinic.get("name"), "plan": plan,
+            "plan_label": (tier_row[0].get("display_name") if tier_row else None) or plan,
+            "segment_label": SEGMENT_LABELS.get(SEGMENT_BY_PLAN.get(plan), ""), "summary": tpl["summary"],
+            "modules": mods, "opd_setup": opd_setup}
+
+
+@router.get("/clinics/{clinic_id}/template")
+async def clinic_template(clinic_id: str, owner: AdminUser = Depends(verify_owner_credentials)):
+    if not is_uuid(clinic_id):
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    # unscoped: platform_admin
+    res = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    return await _template_view(res.data[0])
+
+
+class TemplateApply(BaseModel):
+    modules: List[str] = Field(..., min_length=1, max_length=30)
+
+
+@router.post("/clinics/{clinic_id}/template/apply")
+async def apply_clinic_template(clinic_id: str, body: TemplateApply, request: Request,
+                                owner: AdminUser = Depends(verify_owner_credentials)):
+    """Switch on the modules the owner ticked, in dependency order, each through the ordinary feature toggle (same
+    eligibility, provisioning and audit). Only switches ON: switching off keeps its per-module wind-down confirm."""
+    from app.services.tenant import PLAN_MODULE_TEMPLATES, TEMPLATE_APPLY_ORDER
+    if not is_uuid(clinic_id):
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    # unscoped: platform_admin
+    res = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    clinic = res.data[0]
+    if clinic.get("status") == "DELETED":
+        raise HTTPException(status_code=400, detail="Clinic is deleted")
+    tpl = PLAN_MODULE_TEMPLATES.get(clinic.get("plan") or "soloclinic") or {"recommended": (), "optional": ()}
+    allowed = set(tpl["recommended"]) | set(tpl["optional"])
+    unknown = sorted(set(body.modules) - allowed)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Not part of this plan's template: {', '.join(unknown)}")
+    feats = clinic.get("features") or {}
+    results = []
+    for key in [k for k in TEMPLATE_APPLY_ORDER if k in set(body.modules)]:
+        if feats.get(key) is True:
+            results.append({"key": key, "ok": True, "already_on": True})
+            continue
+        try:
+            await update_clinic_feature(clinic_id, ClinicFeatureOverride(feature=key, enabled=True), request, owner)
+            results.append({"key": key, "ok": True})
+        except HTTPException as e:
+            d = e.detail
+            results.append({"key": key, "ok": False,
+                            "error": d.get("message", str(d)) if isinstance(d, dict) else str(d)})
+    # unscoped: platform_admin
+    fresh = (await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))).data[0]
+    return {"results": results, "applied": sum(1 for r in results if r["ok"] and not r.get("already_on")),
+            "failed": sum(1 for r in results if not r["ok"]), **await _template_view(fresh)}
+
+
+# ── Owner plan change: switch the plan and reconcile modules, features and starter lists to it ─────────────────────
+PLAN_SLUGS = ("soloclinic", "diagstream", "diagbooking", "essential", "polyclinic", "enterprise", "derma", "eye",
+              "dental", "ivf", "multispecialty", "womenchild", "pharmacy")   # = CreateClinicRequest.plan / migration CHECK
+_WIND_DOWN_MODULES = {"opd_enabled": "opd", "ipd_enabled": "ipd", "dx_enabled": "dx", "pharmacy_enabled": "rx",
+                      "care_enabled": "cc"}
+
+
+def _plan_change_impact(clinic: dict, new_plan: str) -> dict:
+    """What a plan change does, computed before anything is written. Modules switched on that the new plan cannot
+    have are switched off — to a fixpoint, because OPD going off takes IPD / Pharmacy / Care / Specialty with it.
+    Per-clinic overrides of plan-level features are reset so the new plan's own feature set applies exactly."""
+    from app.services.tenant import (ALL_FEATURES, FEATURE_LABELS, PLAN_FEATURES, PLAN_MODULE_TEMPLATES,
+                                     TEMPLATE_APPLY_ORDER)
+    feats = dict(clinic.get("features") or {})
+    sim = {**clinic, "plan": new_plan, "features": feats}
+    off: list[str] = []
+    while True:
+        bad = [r["key"] for r in _module_rows(sim) if r["on"] and not r["eligible"]]
+        if not bad:
+            break
+        for k in bad:
+            feats.pop(k, None)
+            off.append(k)
+        sim["features"] = feats
+    order = list(TEMPLATE_APPLY_ORDER)
+    off.sort(key=lambda k: -order.index(k) if k in order else 0)          # dependants first
+    old_set = PLAN_FEATURES.get(clinic.get("plan") or "soloclinic", set())
+    new_set = PLAN_FEATURES.get(new_plan, set())
+    label = lambda f: FEATURE_LABELS.get(f, f)                            # noqa: E731
+    expand = lambda s: set(ALL_FEATURES) if "*" in s else set(s)          # noqa: E731
+    gained = sorted(label(f) for f in expand(new_set) - expand(old_set))
+    lost = sorted(label(f) for f in expand(old_set) - expand(new_set))
+    overrides = sorted(k for k in (clinic.get("features") or {}) if k in ALL_FEATURES)
+    return {"from": clinic.get("plan"), "to": new_plan, "switch_off": off, "features_gained": gained,
+            "features_lost": lost, "overrides_reset": overrides,
+            "recommended": list((PLAN_MODULE_TEMPLATES.get(new_plan) or {}).get("recommended", ()))}
+
+
+async def _wind_down_blockers(clinic_id: str, keys: list[str]) -> list[dict]:
+    """Modules among `keys` that still have open work: switching them off puts them in WIND_DOWN, never deletes."""
+    import importlib
+    out = []
+    for k in keys:
+        mod = _WIND_DOWN_MODULES.get(k)
+        if not mod:
+            continue
+        preview = await importlib.import_module(f"app.services.{mod}").deactivation_preview(clinic_id)
+        if preview.get("blocking"):
+            out.append({"key": k, "preview": preview})
+    return out
+
+
+async def _load_clinic_row(clinic_id: str) -> dict:
+    if not is_uuid(clinic_id):
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    # unscoped: platform_admin
+    res = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    if res.data[0].get("status") == "DELETED":
+        raise HTTPException(status_code=400, detail="Clinic is deleted")
+    return res.data[0]
+
+
+@router.get("/clinics/{clinic_id}/plan-change-preview")
+async def plan_change_preview(clinic_id: str, plan: str = Query(..., max_length=40),
+                              owner: AdminUser = Depends(verify_owner_credentials)):
+    if plan not in PLAN_SLUGS:
+        raise HTTPException(status_code=400, detail=f"Unknown plan '{plan}'")
+    clinic = await _load_clinic_row(clinic_id)
+    if (clinic.get("account_type") or "tenant") != "tenant":
+        raise HTTPException(status_code=400, detail="Only hospital / clinic tenants change plan here.")
+    impact = _plan_change_impact(clinic, plan)
+    return {**impact, "wind_down": await _wind_down_blockers(clinic_id, impact["switch_off"])}
+
+
+class PlanChange(BaseModel):
+    plan: str = Field(..., max_length=40)
+    confirm_name: str = Field(..., max_length=300)
+    confirm_wind_down: bool = False       # modules with open work go to WIND_DOWN (nothing deleted)
+    apply_recommended: bool = False       # then switch on the new plan's recommended modules
+
+
+@router.put("/clinics/{clinic_id}/plan")
+async def change_clinic_plan(clinic_id: str, body: PlanChange, request: Request,
+                             owner: AdminUser = Depends(verify_owner_credentials)):
+    """Change a clinic's plan end to end: modules the new plan cannot have are switched off through the normal
+    toggle (wind-down rules kept), plan-feature overrides reset, the plan's starter lists loaded (hidden, existing
+    rows untouched) and, if asked, the new plan's recommended modules switched on. Nothing is deleted."""
+    from app.routers.clinics import seed_plan_starter_lists
+    from app.services.specialty_catalog import seed_starter_treatments
+    from app.services.tenant import SPECIALTY_BY_PLAN, PLAN_MODULE_TEMPLATES
+    if body.plan not in PLAN_SLUGS:
+        raise HTTPException(status_code=400, detail=f"Unknown plan '{body.plan}'")
+    clinic = await _load_clinic_row(clinic_id)
+    if (clinic.get("account_type") or "tenant") != "tenant":
+        raise HTTPException(status_code=400, detail="Only hospital / clinic tenants change plan here.")
+    if body.confirm_name.strip().casefold() != (clinic.get("name") or "").strip().casefold():
+        raise HTTPException(status_code=400, detail="Type the clinic name exactly to confirm the plan change.")
+    if body.plan == clinic.get("plan"):
+        raise HTTPException(status_code=400, detail="The clinic is already on this plan.")
+    impact = _plan_change_impact(clinic, body.plan)
+    blockers = await _wind_down_blockers(clinic_id, impact["switch_off"])
+    from app.services.tenant import PHARMACY_PLANS
+    on_opd = {"ipd_enabled", "care_enabled"} | ({"pharmacy_enabled"} if body.plan not in PHARMACY_PLANS else set())
+    if "opd_enabled" in impact["switch_off"] and any(b["key"] in on_opd for b in blockers):
+        # They would only reach WIND_DOWN, and OPD cannot switch off under a module still winding down.
+        raise HTTPException(status_code=409, detail={
+            "message": "The new plan has no OPD, but inpatients, pharmacy work or care enrolments are still open. "
+                       "Finish or wind those down first, then change the plan.", "wind_down": blockers})
+    if blockers and not body.confirm_wind_down:
+        raise HTTPException(status_code=409, detail={
+            "message": "Some modules the new plan does not include still have open work. Confirm to wind them down "
+                       "(nothing new starts, open work can finish, nothing is deleted).", "wind_down": blockers})
+
+    feats = {k: v for k, v in (clinic.get("features") or {}).items() if k not in impact["overrides_reset"]}
+    # unscoped: platform super-admin changing one clinic's plan by primary key
+    await sb(supabase.table("clinics").update({"plan": body.plan, "features": feats}).eq("id", clinic_id))
+    switched_off = []
+    for key in impact["switch_off"]:
+        try:
+            await update_clinic_feature(clinic_id, ClinicFeatureOverride(feature=key, enabled=False,
+                                                                         confirm_disable=True), request, owner)
+            switched_off.append({"key": key, "ok": True})
+        except HTTPException as e:
+            d = e.detail
+            switched_off.append({"key": key, "ok": False,
+                                 "error": d.get("message", str(d)) if isinstance(d, dict) else str(d)})
+    starters = None
+    try:
+        if SPECIALTY_BY_PLAN.get(body.plan):
+            starters = await seed_starter_treatments(clinic_id, SPECIALTY_BY_PLAN[body.plan])
+        starters = await seed_plan_starter_lists(clinic_id, body.plan) or starters
+    except Exception as e:  # noqa: BLE001 - starter lists are a convenience; the plan change stands
+        logger.warning(f"plan change: starter lists skipped clinic={clinic_id}: {type(e).__name__}")
+    applied = None
+    if body.apply_recommended:
+        rec = list((PLAN_MODULE_TEMPLATES.get(body.plan) or {}).get("recommended", ()))
+        if rec:
+            applied = (await apply_clinic_template(clinic_id, TemplateApply(modules=rec), request, owner))["results"]
+    _invalidate_clinic(clinic)
+    invalidate_branch_cache(clinic_id)
+    await log_admin_action(user=owner, action="change_clinic_plan", resource_type="clinic", resource_id=clinic_id,
+                           details={"from": clinic.get("plan"), "to": body.plan, "switched_off": impact["switch_off"],
+                                    "overrides_reset": impact["overrides_reset"],
+                                    "apply_recommended": body.apply_recommended},
+                           ip_address=request.client.host if request.client else "unknown")
+    fresh = await _load_clinic_row(clinic_id)
+    return {"success": True, "from": clinic.get("plan"), "to": body.plan, "switched_off": switched_off,
+            "overrides_reset": impact["overrides_reset"], "starter_lists": starters, "applied": applied,
+            **await _template_view(fresh)}
+
+
+@router.get("/clinics/{clinic_id}/value")
+async def clinic_value(clinic_id: str, month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+                       owner: AdminUser = Depends(verify_owner_credentials)):
+    """"Value this month" (OC-07): Revenue Guard ₹, Continuous Care verified ₹, messages sent."""
+    from datetime import date as _date
+
+    from app.services.tenant import care_access, ri_access
+    from app.utils.helpers import today_ist
+    # unscoped: platform_admin
+    res = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    clinic = res.data[0]
+    try:
+        start = _date.fromisoformat(f"{month}-01") if month else today_ist().replace(day=1)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM") from None
+    nxt = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+    out: dict = {"month": start.isoformat()[:7], "ri": None, "cc": None}
+    if ri_access(clinic):
+        from app.services import revenue_guard
+        out["ri"] = await revenue_guard.month_value(clinic_id)
+    if care_access(clinic) or (clinic.get("features") or {}).get("care_enabled") is not None:
+        try:
+            # unscoped: platform_admin
+            ver = (await sb(supabase.table("cc_verifications").select("revenue_paise, evidence_kind").eq("clinic_id", clinic_id)
+                            .gte("verified_at", start.isoformat()).lt("verified_at", nxt.isoformat()))).data or []
+            out["cc"] = {"verified": len(ver), "verified_revenue_paise": sum(int(v.get("revenue_paise") or 0) for v in ver)}
+        except Exception as e:                     # noqa: BLE001
+            logger.warning(f"value: CC skipped: {type(e).__name__}")
+    try:
+        # unscoped: platform_admin
+        msgs = await sb(supabase.table("outbound_message_ledger").select("id", count="exact").eq("clinic_id", clinic_id)
+                        .gte("sent_at", start.isoformat()).lt("sent_at", nxt.isoformat()).limit(1))
+        out["messages_sent"] = msgs.count or 0
+    except Exception:                              # noqa: BLE001 - ledger table name differs on old schemas
+        out["messages_sent"] = None
+    return out
+
+
+@router.get("/clinics/{clinic_id}/onboarding")
+async def clinic_onboarding(clinic_id: str, owner: AdminUser = Depends(verify_owner_credentials)):
+    """Go-live checklist (OC-08) from module state already on the clinic row (no per-module queries)."""
+    # unscoped: platform_admin
+    res = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    c, feats = res.data[0], (res.data[0].get("features") or {})
+    steps = [("whatsapp", "WhatsApp number connected", bool((c.get("config") or {}).get("meta_phone_number_id")
+                                                            or c.get("phone_number_id")))]
+    if feats.get("opd_enabled") is True:
+        steps.append(("opd", "OPD setup finished", c.get("opd_state") == "READY"))
+    if feats.get("pharmacy_enabled") is True:
+        steps.append(("pharmacy", "Pharmacy OS active", c.get("rx_state") == "ACTIVE"))
+    if feats.get("care_enabled") is True:
+        steps.append(("care", "Continuous Care active", c.get("cc_state") == "ACTIVE"))
+    if feats.get("data_import") is True:
+        steps.append(("import", "Data import started", True))
+    if feats.get("specialty_os") is True:
+        steps.append(("specialty", "Specialty OS on", True))
+    items = [{"key": k, "label": label, "done": bool(done)} for k, label, done in steps]
+    return {"steps": items, "done": sum(1 for s in items if s["done"]), "total": len(items)}
 
 
 class PlatformAIBudgetRequest(BaseModel):
@@ -1885,6 +2500,34 @@ class CallMedexWhatsAppSettingsUpdate(BaseModel):
     api_token: Optional[str] = None
 
 
+class CallMedexSwitch(BaseModel):
+    enabled: bool
+
+
+@router.get("/callmedex/status")
+async def get_callmedex_status(owner: AdminUser = Depends(verify_owner_credentials)):
+    """The owner master switch for the whole CallMedex connection (migration 158). Off by default."""
+    from app.integrations.callmedex.switch import switch_status
+    return await switch_status()
+
+
+@router.put("/callmedex/status")
+async def put_callmedex_status(body: CallMedexSwitch, request: Request,
+                               owner: AdminUser = Depends(verify_owner_credentials)):
+    """Switch every CallMedex <-> Kriya connection on or off: inbound APIs, report jobs, outbound calls and callbacks,
+    and WhatsApp routing of the CallMedex number. Applies at once here, within 30 s in every other worker."""
+    from app.integrations.callmedex.switch import set_enabled
+    try:
+        out = await set_enabled(body.enabled, owner.username)
+    except Exception as e:
+        logger.error(f"CallMedex switch update failed: {type(e).__name__}")
+        raise HTTPException(status_code=500, detail="Could not change the CallMedex switch. Nothing changed.")
+    await log_admin_action(user=owner, action="set_callmedex_integration", resource_type="platform",
+                           details={"enabled": body.enabled},
+                           ip_address=request.client.host if request.client else "unknown")
+    return out
+
+
 @router.get("/callmedex/whatsapp-settings")
 async def get_callmedex_whatsapp_settings(
     request: Request,
@@ -2346,7 +2989,7 @@ async def update_plan_tier(
     valid_plans = {
         "soloclinic", "diagstream", "diagbooking", "essential", "polyclinic",
         "enterprise", "derma", "eye", "dental", "ivf", "multispecialty",
-        "womenchild",
+        "womenchild", "pharmacy",
     }
     if plan_name not in valid_plans:
         raise HTTPException(status_code=400, detail=f"Invalid plan: {plan_name}")
@@ -2603,15 +3246,84 @@ async def get_clinic_deletion_preview(
     }
 
 
+ERASE_STORAGE_BUCKET = "lab-reports"   # every clinic file lives under <clinic_id>/ (and callmedex/<clinic_id>/)
+
+
+async def _storage_paths(bucket, prefix: str, depth: int = 0) -> list[str]:
+    """Every object path under prefix. Storage list() is one folder per call; folders come back with no id."""
+    out: list[str] = []
+    offset = 0
+    while True:
+        items = await asyncio.to_thread(bucket.list, prefix, {"limit": 1000, "offset": offset})
+        for it in items or []:
+            path = f"{prefix}/{it['name']}"
+            if it.get("id") is None and depth < 8:
+                out += await _storage_paths(bucket, path, depth + 1)
+            elif it.get("id") is not None:
+                out.append(path)
+        if not items or len(items) < 1000:
+            return out
+        offset += 1000
+
+
+async def _erase_clinic_files(clinic_id: str) -> dict:
+    """Best effort after the DB erase committed: a storage failure is logged and reported, never undoes the erase."""
+    removed, failed = 0, 0
+    try:
+        bucket = supabase.storage.from_(ERASE_STORAGE_BUCKET)
+        for prefix in (clinic_id, f"callmedex/{clinic_id}"):
+            paths = await _storage_paths(bucket, prefix)
+            for i in range(0, len(paths), 100):
+                await asyncio.to_thread(bucket.remove, paths[i:i + 100])
+                removed += len(paths[i:i + 100])
+    except Exception as e:  # noqa: BLE001 - files are unreachable without the DB rows; reported to the owner
+        failed = 1
+        logger.error(f"ERASE_STORAGE_FAILED clinic={clinic_id} type={type(e).__name__}")
+    return {"files_removed": removed, "storage_ok": not failed}
+
+
+async def _erase_clinic(clinic_id: str, confirm_name: Optional[str], owner: AdminUser, client_ip: str) -> dict:
+    if not is_uuid(clinic_id):
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    # unscoped: platform_admin - the clinic being erased, by primary key
+    res = await sb(supabase.table("clinics").select("id, name, whatsapp_number, phone_number_id, account_type")
+                   .eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    clinic = res.data[0]
+    if (confirm_name or "").strip().casefold() != (clinic.get("name") or "").strip().casefold():
+        raise HTTPException(status_code=400, detail="Type the clinic name exactly to confirm permanent erasure.")
+    try:
+        out = (await sb(supabase.rpc("kriya_erase_clinic", {"p_clinic_id": clinic_id}))).data or {}
+    except Exception as e:
+        # The function is one transaction: on any failure nothing was erased.
+        logger.error(f"ERASE_FAILED clinic={clinic_id} type={type(e).__name__} err={str(e)[:300]}")
+        raise HTTPException(status_code=500, detail="Erase failed and was rolled back; nothing was deleted.")
+    files = await _erase_clinic_files(clinic_id)
+    invalidate_tenant_cache(clinic.get("whatsapp_number"), clinic.get("phone_number_id"))
+    invalidate_branch_cache(clinic_id)
+    await log_admin_action(user=owner, action="erase_clinic", resource_type="clinic", resource_id=clinic_id,
+                           details={"clinic_name": clinic.get("name"), "rows": out.get("rows"), **files},
+                           ip_address=client_ip)
+    return {"success": True, "erased": True, "clinic_id": clinic_id, "rows_removed": out.get("rows", 0),
+            "tables": out.get("tables", {}), **files,
+            "message": f"Clinic '{clinic.get('name')}' and all its data were permanently erased."}
+
+
 @router.delete("/clinics/{clinic_id}")
 async def delete_clinic(
     clinic_id: str,
     request: Request,
     confirm_opd_purge: bool = False,
+    erase: bool = False,
+    confirm_name: Optional[str] = Query(None, max_length=300),
     owner: AdminUser = Depends(verify_owner_credentials),
 ):
-    """Safe non-destructive soft-deletion of a clinic preserving historical compliance records."""
+    """Soft-delete by default (records kept, logins off). erase=true permanently removes every row and stored file
+    of the clinic (migration 157); it needs confirm_name equal to the clinic name and works on soft-deleted clinics."""
     client_ip = request.client.host if request.client else "unknown"
+    if erase:
+        return await _erase_clinic(clinic_id, confirm_name, owner, client_ip)
 
     # 1. Fetch clinic
     clinic_res = (
@@ -2678,6 +3390,25 @@ async def delete_clinic(
             rx_rows = await sb(supabase.table("rx_stores").select("id").eq("clinic_id", clinic_id).limit(1))
             if rx_rows.data:
                 await sb(supabase.rpc("rx_purge_clinic", {"p_clinic_id": clinic_id}))
+        # Continuous Care next (migrations 145–149): its rows reference patients, doctors, signed prescriptions and
+        # lab results. Only when the clinic has CC rows, so a non-CC deletion makes no cc_* call.
+        feats_now = (full.data[0].get("features") or {}) if full.data else {}
+        if full.data and "cc_state" in full.data[0] and isinstance(feats_now, dict) and "care_enabled" in feats_now:
+            # unscoped: platform_admin
+            cc_rows = await sb(supabase.table("cc_protocol_activations").select("id").eq("clinic_id", clinic_id).limit(1))
+            cc_cons = await sb(supabase.table("cc_consents").select("id").eq("clinic_id", clinic_id).limit(1))
+            if cc_rows.data or cc_cons.data:
+                await sb(supabase.rpc("cc_purge_clinic", {"p_clinic_id": clinic_id}))
+        # Specialty OS (migrations 151–155): package sales point at OPD invoices, forms at encounters — purge first.
+        if isinstance(feats_now, dict) and "specialty_os" in feats_now:
+            await sb(supabase.rpc("sp_purge_clinic", {"p_clinic_id": clinic_id}))
+        # Data import (migration 144): a collected opening balance points at an OPD invoice
+        if isinstance(feats_now, dict) and "data_import" in feats_now:
+            try:
+                # unscoped: platform_admin
+                await sb(supabase.table("mi_opening_balances").delete().eq("clinic_id", clinic_id))
+            except Exception as e:
+                logger.warning(f"MI opening balances cleanup skipped clinic={clinic_id}: {type(e).__name__}")
         # ipd_purge_clinic purges OPD too (IPD charges reference OPD invoices)
         await sb(supabase.rpc("ipd_purge_clinic" if has_ipd_rows else "opd_purge_clinic", {"p_clinic_id": clinic_id}))
 

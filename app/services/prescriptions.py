@@ -120,6 +120,8 @@ class PrescriptionService:
         count_sent = 0
         count_errors = 0
         count_skipped_dedup = 0
+        count_opted_out = 0
+        count_undelivered = 0
 
         async with distributed_job_lock("prescription_reminders", lease_seconds=120) as acquired:
             if not acquired:
@@ -159,15 +161,26 @@ class PrescriptionService:
                             # renewal rather than being silently lost.
                             if not automated_outbound_allowed(clinic):
                                 break
+                            # CC-L2: a patient who sent STOP gets no engagement message (consent.accepts_engagement).
+                            # A failed lookup keeps the old behaviour (send), so a data gap never mutes reminders.
+                            try:
+                                from app.services.consent import ConsentService
+                                if not await ConsentService().accepts_engagement(rx_clinic_id, rx["patient_phone"]):
+                                    count_opted_out += 1
+                                    break
+                            except Exception:
+                                pass
                             message = (
                                 f"⏰ Medication Reminder\n"
                                 f"Hi {rx['patient_name']}, time to take your medicine!\n"
                                 f"💊 {rx['medicine_name']} — {rx['dosage']}\n"
                                 f"Stay healthy! 🏥 {clinic['name']}"
                             )
-                            await whatsapp_service.send_text(
+                            delivered = await whatsapp_service.send_text(
                                 clinic, rx["patient_phone"], message, _source="prescriptions"
                             )
+                            if delivered is False:   # free text outside the 24-h window is refused (CC-L2)
+                                count_undelivered += 1
 
                             # Record send for deduplication
                             try:
@@ -187,7 +200,10 @@ class PrescriptionService:
                             count_errors += 1
                         break  # Only send one reminder per prescription per cycle
 
-        return {"sent": count_sent, "errors": count_errors, "skipped_dedup": count_skipped_dedup}
+        if count_undelivered:
+            logger.warning(f"Legacy medication reminders not delivered (window closed): {count_undelivered}")
+        return {"sent": count_sent, "errors": count_errors, "skipped_dedup": count_skipped_dedup,
+                "opted_out": count_opted_out, "undelivered": count_undelivered}
 
     # ── Internal helpers ──
 

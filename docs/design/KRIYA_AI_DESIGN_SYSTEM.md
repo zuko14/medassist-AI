@@ -137,7 +137,7 @@ The design language is named **"Clinical Depth"** — a deliberate intersection 
 | `--text-strong` | `#FFFFFF` | Headings, stat numbers, emphasis |
 | `--text` | `#E4EFF1` | Body text, primary content |
 | `--text2` | `#9FB6BF` | Secondary text, labels, descriptions |
-| `--text3` | `#6E8794` | Tertiary text, metadata, placeholders |
+| `--text3` | `#7E97A3` | Tertiary text, metadata, placeholders (A11Y 2026-11-24: was `#6E8794`) |
 | `--mint` | `#C7EAE1` | Brand accent text (used sparingly) |
 
 ### Accent & Interactive
@@ -183,11 +183,14 @@ Activated via `data-theme="light"` on the root html element.
 | `--text` | `#E4EFF1` | `#14262E` |
 | `--text-strong` | `#FFFFFF` | `#071820` |
 | `--text2` | `#9FB6BF` | `#4C6570` |
-| `--text3` | `#6E8794` | `#6B838E` |
+| `--text3` | `#7E97A3` | `#536A75` |
 | `--mint` | `#C7EAE1` | `#2E7F72` |
 | `--accent` | `#3D8BFD` | `#1668D6` |
 | `--green` | `#10B981` | `#047857` |
 | `--red` | `#F2555F` | `#C62F3B` |
+| `--amber` | `#F5A524` | `#94570A` (A11Y: was `#A65E07`) |
+| `--action-grad` (new; primary buttons — `--brand-grad` is now decoration only) | `#047857 → #0E6FA8 → #1668D6` | same |
+| `--accent-fill` / `--red-fill` / `--green-fill` (new; solid fills under white text) | `#1A66D1` / `#C62F3B` / `#047857` | `#1668D6` / `#C62F3B` / `#047857` |
 | `--shadow` | `0 8px 32px rgba(0,0,0,0.42)` | `0 8px 32px rgba(12,40,48,0.10)` |
 
 > **Design rule:** Light theme is *mint-tinted white*, never neutral grey. The same brand rim (`--rim`) carries across both themes so the identity remains cohesive.
@@ -220,7 +223,7 @@ Activated via `data-theme="light"` on the root html element.
 
 | Element | Size | Weight | Tracking | Line Height | Colour |
 |:--|:--|:--|:--|:--|:--|
-| Page title (h2) | `1.6rem` | 600 | `-0.025em` | 1.2 | `--text-strong` |
+| Page title (h2) | `1.5rem` | 700 | `-0.025em` | 1.2 | `--text-strong` |
 | Card heading (h3) | `1rem` | 600 | `-0.018em` | 1.4 | `--text-strong` |
 | Login title | `1.35rem` | 700 | `-0.03em` | 1.3 | `--text-strong` |
 | Sidebar brand | `1.1rem` | 700 | default | 1.3 | `--text` |
@@ -232,8 +235,10 @@ Activated via `data-theme="light"` on the root html element.
 | Table cell | `0.87rem` | 400 | default | 1.4 | `--text` |
 | Badge | `0.73rem` | 600 | `0.3px` | 1 | semantic colour |
 | Stat label | `0.75rem` | 500 | `0.08em` | 1.3 | `--text3` |
-| Stat number | `2rem` | 600 | `-0.03em` | 1 | `--text-strong` |
+| Stat number | `2.2rem` | 800 | `-0.03em` | 1 | `--text-strong` |
 | Meta/subtitle | `0.85rem` | 400 | default | 1.5 | `--text3` |
+
+> Corrected 2026-11-24: page title and stat number now match the live panel (`admin/index.html:807`, `:852`).
 
 ### Typographic Features
 
@@ -738,6 +743,10 @@ All badges share this structure:
 
 All icons are **inline SVG symbols** defined once in a hidden svg block and referenced via use href="#i-name".
 
+> **Corrected 2026-11-24 (live panel):** the clinic panel uses three mechanisms — inline Lucide-geometry SVG in the
+> sidebar, the `ICONS` registry + `icon(name)` helper for inline glyphs and toasts, and this `<symbol>` sprite for buttons
+> (owner console mainly). Which one to use where: [NEXT-LANES-UI-SPEC.md](NEXT-LANES-UI-SPEC.md) §3.
+
 ### Properties
 
 | Property | Value |
@@ -943,7 +952,7 @@ input:focus { box-shadow: 0 0 0 3px var(--accent-glow); }
 |:--|:--|:--|
 | --text (#E4EFF1) on --bg (#040A11) | **15.2:1** | AAA |
 | --text2 (#9FB6BF) on --surface | **6.8:1** | AA |
-| --text3 (#6E8794) on --surface | **4.2:1** | AA (large text) |
+| --text3 (#7E97A3) on --surface | **5.19:1** | AA |
 | --accent (#3D8BFD) on --bg | **5.1:1** | AA |
 | White on --brand-grad midpoint | **4.6:1** | AA |
 

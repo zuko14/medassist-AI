@@ -1213,7 +1213,8 @@ async def send_prescription(
     items = items_res.data or []
 
     from app.services.opd_pdf import render_prescription_pdf
-    pdf_bytes = render_prescription_pdf(rx, items)
+    from app.services.sp import forms_for_print
+    pdf_bytes = render_prescription_pdf(rx, items, await forms_for_print(clinic, rx.get("encounter_id")))
 
     from app.services.whatsapp import whatsapp_service
     filename = f"Rx_{rx['id'][:8]}.pdf"

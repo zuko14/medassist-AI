@@ -1,0 +1,81 @@
+{
+ "pack": "eye_glaucoma",
+ "cases": [
+  {
+   "name": "IOP 121 d ago due",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "last_iop_on": "d:-121"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "iop_review_due"
+    ]
+   }
+  },
+  {
+   "name": "IOP recent",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "last_iop_on": "d:-100"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "3 missed drops",
+   "params": {},
+   "obs": [
+    [
+     "adherence",
+     -1,
+     null,
+     null,
+     "missed"
+    ],
+    [
+     "adherence",
+     -1,
+     null,
+     null,
+     "missed"
+    ],
+    [
+     "adherence",
+     -1,
+     null,
+     null,
+     "missed"
+    ]
+   ],
+   "labs": [],
+   "extra": {
+    "last_iop_on": "d:-10"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "missed_drops"
+    ]
+   }
+  }
+ ]
+}

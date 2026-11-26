@@ -456,6 +456,9 @@ def invalidate_tenant_cache(whatsapp_number: str = None, phone_number_id: str = 
 #   womenchild  — Women & Child hospital: Child Care, Women Care and Fertility
 #                 Care under one roof, plus OPD departments, lab and radiology.
 #                 Same feature set as multispecialty (migration 082).
+#   pharmacy    — Standalone pharmacy / medical store (migration 150; docs/pharmacy-os/RETAIL-PLAN.md). No doctors,
+#                 no booking, no lab: Pharmacy OS without OPD (rx_eligible), a pharmacy-only WhatsApp menu and
+#                 voice scope. Never a specialty plan.
 
 # Specialty hospitals (migration 077). A doctor clinic's core, plus the
 # treatments catalogue. multi_branch and staff_training are included because
@@ -604,6 +607,13 @@ PLAN_FEATURES["multispecialty"] = set(PLAN_FEATURES["polyclinic"]) | {"specialty
 # scans are the diagnostics half -- so it is derived, not retyped.
 PLAN_FEATURES["womenchild"] = set(PLAN_FEATURES["multispecialty"])
 
+# Standalone pharmacy (migration 150, RXR-ADR-1): no booking, no reminders, no lab features. Not in
+# SPECIALTY_BY_PLAN / HYBRID_SPECIALTY_PLANS.
+PLAN_FEATURES["pharmacy"] = {"multilingual", "emergency_escalation", "clinical_firewall", "admin_dashboard",
+                             "compliance_dpdp", "compliance_nmc", "multi_branch", "payments_razorpay",
+                             "holiday_calendar", "staff_training"}
+PHARMACY_PLANS: frozenset[str] = frozenset({"pharmacy"})
+
 # Flat, sorted list of every named feature across all plans — excludes the
 # "*" enterprise wildcard sentinel. Used by GET /admin/me (app/routers/admin.py)
 # to tell the admin panel frontend which tabs to show, without duplicating
@@ -671,6 +681,17 @@ OPT_IN_FEATURES: dict[str, str] = {
     "kriya_ketu": "Kriya Ketu assistant",
     "dx_enabled": "Diagnostic OS (Registration, Samples, Lab, Reports, B2B)",
     "pharmacy_enabled": "Pharmacy OS (Stores, Purchase, POS, IPD Dispensing, Registers)",
+    "revenue_guard": "Revenue Guard (nightly unbilled-charge check)",
+    "data_import": "Switch to Kriya (data import from the old system)",
+    "care_enabled": "Continuous Care (chronic follow-up on WhatsApp and voice)",
+    # Specialty OS (migrations 151–155; docs/specialty-os): owner opt-in, plan-eligible, never the wildcard
+    "specialty_os": "Specialty OS (exam forms, clinical photos, packages, estimates, imaging links, camps)",
+    "optical_enabled": "Eye: OD/OS exam, spectacle Rx and optical job board",
+    "dental_chart": "Dental: odontogram, perio chart, lab orders and compliance dates",
+    "derma_os": "Derma: procedure records, before/after photos and session packages",
+    "ivf_lab_enabled": "IVF: couples, cycle chart, embryology witnessing",
+    "obgyn_enabled": "Antenatal care: pregnancy record and ANC timeline",
+    "paediatrics_enabled": "Immunisation: vaccine schedule, doses and batches",
 }
 
 
@@ -729,9 +750,14 @@ def dx_access(clinic: Optional[dict]) -> Optional[str]:
 
 def rx_eligible(clinic: Optional[dict]) -> bool:
     """Pharmacy OS builds on OPD OS (patient registry, MRN, prescriptions,
-    cashier shifts, number counters), so only an OPD-enabled tenant may turn it
-    on (docs/pharmacy-os/ADR.md ADR-RX-09)."""
-    return opd_enabled(clinic)
+    cashier shifts, number counters), so an OPD-enabled tenant may turn it
+    on (docs/pharmacy-os/ADR.md ADR-RX-09) — and so may a standalone pharmacy
+    (plan `pharmacy`, RXR-ADR-2), which reaches the same registry / shift /
+    counter services through /admin/rx routes. Every other plan unchanged."""
+    if opd_enabled(clinic):
+        return True
+    return (bool(clinic) and (clinic.get("account_type") or "tenant") == "tenant"
+            and clinic.get("plan") in PHARMACY_PLANS)
 
 
 def rx_access(clinic: Optional[dict]) -> Optional[str]:
@@ -750,6 +776,168 @@ def rx_access(clinic: Optional[dict]) -> Optional[str]:
     if clinic.get("rx_state") == "WIND_DOWN":
         return "WIND_DOWN"
     return None
+
+
+def ri_modules(clinic: Optional[dict]) -> list[str]:
+    """The billing modules Revenue Guard may read for this clinic (docs/revenue-integrity/SPEC.md §6): a rule runs
+    only for a module the clinic has. OT is part of IPD OS; the RX rule over IPD dispenses needs both."""
+    if not clinic:
+        return []
+    ipd = ipd_access(clinic) is not None
+    out = (["opd"] if opd_enabled(clinic) else []) + (["ipd", "ot"] if ipd else [])
+    return out + (["rx"] if rx_access(clinic) else []) + (["dx"] if dx_access(clinic) else [])
+
+
+def ri_eligible(clinic: Optional[dict]) -> bool:
+    """Revenue Guard reads OPD / IPD / DX / RX billing: a regular tenant with at least one of them."""
+    return bool(clinic) and (clinic.get("account_type") or "tenant") == "tenant" and bool(ri_modules(clinic))
+
+
+def ri_access(clinic: Optional[dict]) -> bool:
+    """Owner opt-in only (features.revenue_guard is True, never has_feature(): the enterprise wildcard must not
+    switch it on) on an eligible tenant. Read-only over billing, so there is no wind-down state."""
+    overrides = (clinic or {}).get("features") or {}
+    return isinstance(overrides, dict) and overrides.get("revenue_guard") is True and ri_eligible(clinic)
+
+
+def mi_access(clinic: Optional[dict]) -> bool:
+    """'Switch to Kriya' import: owner opt-in (features.data_import is True, never the wildcard) on a regular tenant."""
+    overrides = (clinic or {}).get("features") or {}
+    return (bool(clinic) and (clinic.get("account_type") or "tenant") == "tenant" and isinstance(overrides, dict)
+            and overrides.get("data_import") is True)
+
+
+def care_eligible(clinic: Optional[dict]) -> bool:
+    """Continuous Care builds on OPD OS (patient registry, signed prescriptions, bookings; docs/continuous-care/ADR.md)."""
+    return bool(clinic) and (clinic.get("account_type") or "tenant") == "tenant" and opd_enabled(clinic)
+
+
+def care_access(clinic: Optional[dict]) -> Optional[str]:
+    """'ACTIVE', 'WIND_DOWN' or None. ACTIVE needs the owner's explicit opt-in (features.care_enabled is True, never
+    has_feature()) on an OPD tenant. WIND_DOWN is what an owner disable leaves while enrolments are still open: no new
+    enrolment or outreach; open cases and verification continue."""
+    if not clinic or (clinic.get("account_type") or "tenant") != "tenant":
+        return None
+    overrides = clinic.get("features") or {}
+    if isinstance(overrides, dict) and overrides.get("care_enabled") is True and care_eligible(clinic):
+        return "ACTIVE"
+    if clinic.get("cc_state") == "WIND_DOWN":
+        return "WIND_DOWN"
+    return None
+
+
+#: Owner-console segments (OC-02/OC-04): every plan in exactly one (tests/test_sp_owner_console.py guards the set).
+SEGMENT_BY_PLAN: dict[str, str] = {
+    "soloclinic": "hospitals", "essential": "hospitals", "polyclinic": "hospitals", "enterprise": "hospitals",
+    "multispecialty": "hospitals",
+    "derma": "specialty", "eye": "specialty", "dental": "specialty", "ivf": "specialty", "womenchild": "specialty",
+    "diagstream": "diagnostics", "diagbooking": "diagnostics",
+    "pharmacy": "pharmacies",
+}
+SEGMENT_LABELS: dict[str, str] = {"hospitals": "Hospitals & clinics", "specialty": "Specialty", "diagnostics": "Diagnostics",
+                                  "pharmacies": "Pharmacies"}
+
+
+#: Suggested module template per plan (owner console "Suggested setup"). "recommended" is pre-ticked, "optional" is
+#: offered unticked; the owner decides and nothing is switched on until they apply it. Every key is an
+#: OPT_IN_FEATURES flag (tests/test_plan_templates.py guards keys, plans and dependency order). Applying runs each key
+#: through PATCH /platform/clinics/{id}/features, so eligibility, provisioning and audit are unchanged.
+_HOSPITAL_CORE = ("opd_enabled", "pharmacy_enabled", "care_enabled", "revenue_guard", "kriya_ketu", "ai_receptionist")
+_SP_ALL_PACKS = ("optical_enabled", "dental_chart", "derma_os", "ivf_lab_enabled", "obgyn_enabled",
+                 "paediatrics_enabled")
+PLAN_MODULE_TEMPLATES: dict[str, dict] = {
+    "soloclinic": {"summary": "Single-doctor clinic: front desk, queue, consultation and billing, with WhatsApp "
+                              "follow-up and an AI receptionist.",
+                   "recommended": ("opd_enabled", "care_enabled", "kriya_ketu", "ai_receptionist"),
+                   "optional": ("pharmacy_enabled", "revenue_guard", "data_import")},
+    "essential": {"summary": "Clinic with a dispensary and lab reports: OPD, pharmacy and chronic-care follow-up.",
+                  "recommended": _HOSPITAL_CORE,
+                  "optional": ("dx_enabled", "data_import")},
+    "polyclinic": {"summary": "Multi-doctor day-care centre: OPD, in-house pharmacy and lab. No inpatient wards "
+                              "unless the centre admits patients.",
+                   "recommended": _HOSPITAL_CORE + ("dx_enabled",),
+                   "optional": ("ipd_enabled", "data_import")},
+    "multispecialty": {"summary": "Full hospital: OPD, inpatient wards, OT and nursing, pharmacy, lab, specialty "
+                                  "exam forms, chronic care, Revenue Guard and the AI receptionist.",
+                       "recommended": _HOSPITAL_CORE + ("ipd_enabled", "dx_enabled", "specialty_os"),
+                       "optional": _SP_ALL_PACKS + ("data_import",)},
+    "womenchild": {"summary": "Women & child hospital: OPD, labour ward and NICU (IPD), pharmacy, lab, antenatal "
+                              "care and immunisation.",
+                   "recommended": _HOSPITAL_CORE + ("ipd_enabled", "dx_enabled", "specialty_os", "obgyn_enabled",
+                                                    "paediatrics_enabled"),
+                   "optional": ("ivf_lab_enabled", "data_import")},
+    "eye": {"summary": "Eye hospital: OPD with OD/OS exam, spectacle Rx and optical store, pharmacy and diabetic "
+                       "eye follow-up.",
+            "recommended": _HOSPITAL_CORE + ("specialty_os", "optical_enabled"),
+            "optional": ("ipd_enabled", "data_import")},
+    "dental": {"summary": "Dental clinic: OPD with odontogram, perio chart, lab orders and treatment-plan reminders.",
+               "recommended": ("opd_enabled", "care_enabled", "revenue_guard", "kriya_ketu", "ai_receptionist",
+                               "specialty_os", "dental_chart"),
+               "optional": ("pharmacy_enabled", "data_import")},
+    "derma": {"summary": "Skin & aesthetics clinic: OPD with procedure records, before/after photos, session "
+                         "packages and a dispensary.",
+              "recommended": _HOSPITAL_CORE + ("specialty_os", "derma_os"),
+              "optional": ("data_import",)},
+    "ivf": {"summary": "Fertility centre: OPD, couples and cycle chart, embryology witnessing, hormone lab and "
+                       "pharmacy.",
+            "recommended": _HOSPITAL_CORE + ("dx_enabled", "specialty_os", "ivf_lab_enabled"),
+            "optional": ("ipd_enabled", "data_import")},
+    "diagstream": {"summary": "Diagnostic centre: Diagnostic OS end to end (registration, samples, results, "
+                              "reports, B2B), report delivery on WhatsApp and the AI receptionist.",
+                   "recommended": ("dx_enabled", "revenue_guard", "kriya_ketu", "ai_receptionist"),
+                   "optional": ("corporate_health", "data_import")},
+    "diagbooking": {"summary": "Test-booking lab: Diagnostic OS for bookings, collection and results, with the AI "
+                               "receptionist.",
+                    "recommended": ("dx_enabled", "kriya_ketu", "ai_receptionist"),
+                    "optional": ("revenue_guard", "corporate_health", "data_import")},
+    "pharmacy": {"summary": "Standalone pharmacy: stores, purchase, POS, registers and refill reminders.",
+                 "recommended": ("pharmacy_enabled", "revenue_guard", "kriya_ketu"),
+                 "optional": ("ai_receptionist", "data_import")},
+    "enterprise": {"summary": "Hospital group: every operating system on, specialty packs as the hospital needs.",
+                   "recommended": _HOSPITAL_CORE + ("ipd_enabled", "dx_enabled", "specialty_os"),
+                   "optional": _SP_ALL_PACKS + ("corporate_health", "data_import")},
+}
+
+#: Apply order: a module is switched on only after the modules it depends on (OPD before IPD / Pharmacy / Care /
+#: Specialty; Specialty before its packs; a billing module before Revenue Guard).
+TEMPLATE_APPLY_ORDER: tuple = ("opd_enabled", "ipd_enabled", "dx_enabled", "pharmacy_enabled", "care_enabled",
+                               "specialty_os") + _SP_ALL_PACKS + ("revenue_guard", "data_import", "kriya_ketu",
+                                                                  "ai_receptionist", "corporate_health")
+
+
+#: Specialty OS packs → (owner flag, plans that may switch it on). Hybrids and enterprise are eligible only through
+#: the explicit owner flag (never the "*" wildcard); every pack also needs the shared block (specialty_os) and OPD.
+SP_PACKS: dict[str, tuple[str, frozenset]] = {
+    "eye": ("optical_enabled", frozenset({"eye", "multispecialty", "enterprise"})),
+    "dental": ("dental_chart", frozenset({"dental", "multispecialty", "enterprise"})),
+    "derma": ("derma_os", frozenset({"derma", "multispecialty", "enterprise"})),
+    "ivf": ("ivf_lab_enabled", frozenset({"ivf", "womenchild", "multispecialty", "enterprise"})),
+    "anc": ("obgyn_enabled", frozenset({"womenchild", "multispecialty", "enterprise"})),
+    "imm": ("paediatrics_enabled", frozenset({"womenchild", "multispecialty", "enterprise"})),
+}
+SP_SHARED_PLANS: frozenset = frozenset({"derma", "eye", "dental", "ivf", "multispecialty", "womenchild", "enterprise"})
+
+
+def sp_eligible(clinic: Optional[dict], pack: Optional[str] = None) -> bool:
+    """May this clinic switch the Specialty OS (or one pack of it) on? A regular tenant with OPD OS on, on a specialty /
+    hybrid / enterprise plan; a pack also needs its plan in SP_PACKS."""
+    if not clinic or (clinic.get("account_type") or "tenant") != "tenant" or not opd_enabled(clinic):
+        return False
+    plan = clinic.get("plan")
+    if pack is None:
+        return plan in SP_SHARED_PLANS
+    return pack in SP_PACKS and plan in SP_PACKS[pack][1]
+
+
+def sp_access(clinic: Optional[dict], pack: Optional[str] = None) -> bool:
+    """Owner opt-in only (features[flag] is True, never has_feature()), on an eligible tenant. pack=None is the shared
+    blocks (S1–S9); a pack additionally needs its own flag."""
+    feats = (clinic or {}).get("features") or {}
+    if not isinstance(feats, dict) or feats.get("specialty_os") is not True or not sp_eligible(clinic):
+        return False
+    if pack is None:
+        return True
+    return sp_eligible(clinic, pack) and feats.get(SP_PACKS[pack][0]) is True
 
 
 def opd_enabled(clinic: Optional[dict]) -> bool:

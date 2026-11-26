@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
 from app.database import supabase
@@ -386,6 +387,34 @@ class SchedulerService:
             id="rx_alerts_scan",
             replace_existing=True,
         )
+        # ── Revenue Guard (migration 143): nightly unbilled-charge scan of yesterday (01:30 IST, after
+        # auto_complete_appointments) and the admin digest (08:00 IST). Both CAS-locked; opted-in clinics only.
+        self.scheduler.add_job(
+            self.ri_nightly_scan,
+            CronTrigger(hour=1, minute=30),
+            id="ri_nightly_scan",
+            replace_existing=True,
+        )
+        self.scheduler.add_job(
+            self.ri_digest,
+            CronTrigger(hour=8, minute=0),
+            id="ri_digest",
+            replace_existing=True,
+        )
+        # ── Continuous Care (migrations 145–149): every job CAS-locked; clinics with cc_state OFF are skipped first.
+        for job_id, fn, trig in (
+            ("cc_card_dispatch", self.cc_card_dispatch, IntervalTrigger(minutes=5)),
+            ("cc_sla_sweep", self.cc_sla_sweep, IntervalTrigger(minutes=15)),
+            ("cc_plan_rebuild", self.cc_plan_rebuild, IntervalTrigger(minutes=30)),
+            ("cc_schedule_materialize", self.cc_schedule_materialize, CronTrigger(hour=23, minute=30)),
+            ("cc_verify", self.cc_verify, CronTrigger(hour=1, minute=45)),
+            ("cc_radar_morning", self.cc_radar, CronTrigger(hour=6, minute=30)),
+            ("cc_radar_afternoon", self.cc_radar, CronTrigger(hour=13, minute=30)),
+            ("cc_daily_health", self.cc_daily_health, CronTrigger(hour=7, minute=0)),
+            ("cc_evaluate_daily", self.cc_evaluate_daily, CronTrigger(hour=7, minute=15)),
+            ("cc_outcome_snapshot", self.cc_outcome_snapshot, CronTrigger(day=1, hour=4, minute=0)),
+        ):
+            self.scheduler.add_job(fn, trig, id=job_id, replace_existing=True)
         self.scheduler.add_job(
             self.rx_refill_reminders,
             CronTrigger(hour=9, minute=30),
@@ -557,6 +586,104 @@ class SchedulerService:
                     await rx_alerts.run_scan()
                 except Exception as e:
                     logger.error(f"RX alert scan failed: {e}")
+
+    async def _cc_each(self, name: str, lease: int, fn) -> None:
+        """Run fn(clinic) for every clinic whose Continuous Care is not OFF, under one CAS lock."""
+        from app.database import sb, supabase
+        from app.services.distributed_lock import distributed_job_lock
+        from app.services.tenant import care_access
+
+        async with distributed_job_lock(name, lease_seconds=lease) as acquired:
+            if not acquired:
+                return
+            try:
+                # unscoped: platform_sweep (pre-filtered on cc_state, idx_clinics_cc_on)
+                res = await sb(supabase.table("clinics").select("*").neq("cc_state", "OFF").eq("is_active", True))
+            except Exception as e:
+                logger.error(f"{name}: clinic sweep failed: {type(e).__name__}")
+                return
+            for clinic in res.data or []:
+                if clinic.get("status") == "DELETED" or care_access(clinic) is None:
+                    continue
+                try:
+                    await fn(clinic)
+                except Exception as e:                    # one clinic never stops the sweep
+                    logger.error(f"{name} failed clinic={clinic.get('id')}: {type(e).__name__}")
+
+    async def cc_card_dispatch(self):
+        from app.services import cc_channels
+        await self._cc_each("cc_card_dispatch", 280, lambda c: cc_channels.dispatch(c) if care_active(c) else _noop())
+
+    async def cc_sla_sweep(self):
+        from app.services import cc_cases
+        await self._cc_each("cc_sla_sweep", 600, cc_cases.sla_sweep)
+
+    async def cc_plan_rebuild(self):
+        from app.services import cc
+        await self._cc_each("cc_plan_rebuild", 1200, lambda c: cc.rebuild_on_new_rx(c) if care_active(c) else _noop())
+
+    async def cc_schedule_materialize(self):
+        from app.services import cc, cc_channels
+
+        async def run(c):
+            if care_active(c):
+                await cc_channels.materialize(c)
+            else:
+                await cc.finish_wind_down(c["id"])
+        await self._cc_each("cc_schedule_materialize", 1800, run)
+
+    async def cc_verify(self):
+        from app.services import cc_verify
+        await self._cc_each("cc_verify", 1800, cc_verify.run)
+
+    async def cc_radar(self):
+        from app.services import cc_radar
+        await self._cc_each("cc_radar", 1800, lambda c: cc_radar.rebuild(c) if care_active(c) else _noop())
+
+    async def cc_daily_health(self):
+        from app.services import cc_channels
+        await self._cc_each("cc_daily_health", 900, cc_channels.refresh_wa_health)
+
+    async def cc_evaluate_daily(self):
+        """Time-based rules (overdue labs, missed visits) need a daily evaluation even without a new reading."""
+        from app.database import fetch_all, scoped_query
+        from app.services import cc
+
+        async def run(c):
+            if not care_active(c):
+                return
+            for e in await fetch_all(lambda: scoped_query("cc_enrollments", c["id"]).eq("status", "active"),
+                                     label="cc:eval"):
+                await cc.evaluate_enrollment(c, e)
+        await self._cc_each("cc_evaluate_daily", 1800, run)
+
+    async def cc_outcome_snapshot(self):
+        from app.services import cc_verify
+        from app.utils.helpers import today_ist
+        prev = (today_ist().replace(day=1) - timedelta(days=1)).replace(day=1)
+        await self._cc_each("cc_outcome_snapshot", 1800, lambda c: cc_verify.snapshot_month(c["id"], prev))
+
+    async def ri_nightly_scan(self):
+        from app.services import revenue_guard
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("ri_scan", lease_seconds=1800) as acquired:
+            if acquired:
+                try:
+                    await revenue_guard.run_nightly()
+                except Exception as e:
+                    logger.error(f"RI scan failed: {type(e).__name__}")
+
+    async def ri_digest(self):
+        from app.services import revenue_guard
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("ri_digest", lease_seconds=900) as acquired:
+            if acquired:
+                try:
+                    await revenue_guard.run_digest()
+                except Exception as e:
+                    logger.error(f"RI digest failed: {type(e).__name__}")
 
     async def rx_compute_metrics(self):
         from app.services import rx_metrics
@@ -2006,3 +2133,13 @@ class SchedulerService:
 
 # Global instance
 scheduler_service = SchedulerService()
+
+
+def care_active(clinic: dict) -> bool:
+    """New outreach only while ACTIVE (WIND_DOWN: open cases and verification continue, no new cards)."""
+    from app.services.tenant import care_access
+    return care_access(clinic) == "ACTIVE"
+
+
+async def _noop():
+    return None

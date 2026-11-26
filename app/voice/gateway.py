@@ -354,8 +354,12 @@ async def exotel_stream(ws: WebSocket, k: str = ""):
         _ACTIVE[call["id"]] = runner
         outbound = call.get("direction") == "outbound"
         packet = (call.get("handoff_packet") or {}) if outbound else {}
-        status = await runner.run(await session.start(outbound=outbound, interest=packet.get("interest"),
-                                                      reminder=packet.get("reminder")))
+        if outbound and packet.get("care"):
+            # Continuous Care check-in (ADR-CC-16): its own packet branch; reminder / lead calls unchanged below
+            status = await runner.run(await session.start(outbound=True, care=packet.get("care")))
+        else:
+            status = await runner.run(await session.start(outbound=outbound, interest=packet.get("interest"),
+                                                          reminder=packet.get("reminder")))
     except Exception as e:
         logger.error(f"VOICE_CALL_CRASHED call={call['call_ref']}: {type(e).__name__}: {e}")
         await store.add_event(ctx.clinic_id, ctx.call_id, "error", "CALL_CRASHED", status="fail",
@@ -365,6 +369,12 @@ async def exotel_stream(ws: WebSocket, k: str = ""):
         _ACTIVE.pop(call["id"], None)
         usage = runner.usage() if runner else {}
         await session.finish(status, **usage)
+        if call.get("direction") == "outbound" and (call.get("handoff_packet") or {}).get("care"):
+            try:   # the care answers go to Continuous Care (confirmed numbers only); never blocks the job bookkeeping
+                from app.services import cc_voice
+                await cc_voice.record_call(ctx.clinic, call, session.state)
+            except Exception as e:
+                logger.error(f"VOICE_CARE_RECORD_FAILED call={call['call_ref']}: {type(e).__name__}")
         if call.get("direction") == "outbound":
             from .outbound import job_finished
             await job_finished(call, success=status in ("completed", "handed_off"))

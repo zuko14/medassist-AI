@@ -1,0 +1,157 @@
+{
+ "pack": "ivf_cycle",
+ "cases": [
+  {
+   "name": "trigger tomorrow, not acknowledged: urgent, text verbatim",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "trigger_on": "d:1",
+    "trigger_text": "Inj. hCG 10000 IU at 21:30 on 26 Nov"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "trigger_not_acknowledged"
+    ],
+    "detail": {
+     "trigger_not_acknowledged": {
+      "trigger": "Inj. hCG 10000 IU at 21:30 on 26 Nov"
+     }
+    }
+   }
+  },
+  {
+   "name": "trigger in 2 days: not yet",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "trigger_on": "d:2",
+    "trigger_text": "x"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "trigger_not_acknowledged"
+    ]
+   }
+  },
+  {
+   "name": "trigger acknowledged",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "trigger_on": "d:0",
+    "trigger_text": "x",
+    "trigger_acknowledged": true
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "trigger_not_acknowledged"
+    ]
+   }
+  },
+  {
+   "name": "beta-hCG due after day 14",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "transfer_on": "d:-15"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "beta_hcg_due"
+    ]
+   }
+  },
+  {
+   "name": "beta-hCG not due on day 14",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "transfer_on": "d:-14"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "beta_hcg_due"
+    ]
+   }
+  },
+  {
+   "name": "beta-hCG done after transfer",
+   "params": {},
+   "obs": [],
+   "labs": [
+    [
+     "beta_hcg",
+     -5,
+     250,
+     "high"
+    ]
+   ],
+   "extra": {
+    "transfer_on": "d:-20"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "beta_hcg_due"
+    ]
+   }
+  },
+  {
+   "name": "OHSS signs: urgent + card",
+   "params": {},
+   "obs": [
+    [
+     "symptoms",
+     0,
+     null,
+     null,
+     "danger"
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "ohss_signs"
+    ],
+    "card": "ohss_danger"
+   }
+  }
+ ]
+}

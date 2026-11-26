@@ -1,0 +1,429 @@
+{
+ "pack": "htn",
+ "cases": [
+  {
+   "name": "controlled and reviewed",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     -1,
+     130,
+     80
+    ],
+    [
+     "bp",
+     -2,
+     128,
+     82
+    ],
+    [
+     "bp",
+     -3,
+     132,
+     84
+    ],
+    [
+     "bp",
+     -4,
+     126,
+     78
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "180 systolic today: crisis + card",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     0,
+     180,
+     100
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "crisis_range"
+    ],
+    "card": "bp_very_high_symptoms"
+   }
+  },
+  {
+   "name": "110 diastolic: crisis",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     -1,
+     150,
+     110
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "urgent",
+    "has": [
+     "crisis_range"
+    ]
+   }
+  },
+  {
+   "name": "179/109 is not a crisis",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     0,
+     179,
+     109
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "crisis_range"
+    ]
+   }
+  },
+  {
+   "name": "crisis 3 days ago is outside 2 d window",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     -3,
+     190,
+     100
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "crisis_range"
+    ]
+   }
+  },
+  {
+   "name": "mean of 4 >= 140 uncontrolled",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     -1,
+     145,
+     85
+    ],
+    [
+     "bp",
+     -2,
+     142,
+     86
+    ],
+    [
+     "bp",
+     -3,
+     138,
+     84
+    ],
+    [
+     "bp",
+     -4,
+     141,
+     80
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "uncontrolled"
+    ]
+   }
+  },
+  {
+   "name": "only 3 readings: no mean",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     -1,
+     150,
+     95
+    ],
+    [
+     "bp",
+     -2,
+     150,
+     95
+    ],
+    [
+     "bp",
+     -3,
+     150,
+     95
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "uncontrolled"
+    ]
+   }
+  },
+  {
+   "name": "diastolic mean >= 90 uncontrolled",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     -1,
+     130,
+     92
+    ],
+    [
+     "bp",
+     -2,
+     130,
+     90
+    ],
+    [
+     "bp",
+     -3,
+     130,
+     91
+    ],
+    [
+     "bp",
+     -4,
+     130,
+     90
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "uncontrolled"
+    ]
+   }
+  },
+  {
+   "name": "low 88 today + card",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     0,
+     88,
+     60
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -10,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "low_bp"
+    ],
+    "card": "low_bp_dizzy"
+   }
+  },
+  {
+   "name": "review overdue at 36 d + visit_due",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     -1,
+     130,
+     80
+    ],
+    [
+     "bp",
+     -2,
+     128,
+     82
+    ],
+    [
+     "bp",
+     -3,
+     132,
+     84
+    ],
+    [
+     "bp",
+     -4,
+     126,
+     78
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -36,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "review_overdue"
+    ],
+    "card": "visit_due"
+   }
+  },
+  {
+   "name": "review at 35 d not overdue",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     -1,
+     130,
+     80
+    ],
+    [
+     "bp",
+     -2,
+     128,
+     82
+    ],
+    [
+     "bp",
+     -3,
+     132,
+     84
+    ],
+    [
+     "bp",
+     -4,
+     126,
+     78
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -35,
+   "unanswered": 0,
+   "expect": {
+    "not": [
+     "review_overdue"
+    ]
+   }
+  },
+  {
+   "name": "never visited: overdue",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     -1,
+     130,
+     80
+    ],
+    [
+     "bp",
+     -2,
+     128,
+     82
+    ],
+    [
+     "bp",
+     -3,
+     132,
+     84
+    ],
+    [
+     "bp",
+     -4,
+     126,
+     78
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "has": [
+     "review_overdue"
+    ]
+   }
+  },
+  {
+   "name": "crisis card wins over visit_due",
+   "params": {},
+   "obs": [
+    [
+     "bp",
+     0,
+     185,
+     100
+    ]
+   ],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "card": "bp_very_high_symptoms"
+   }
+  }
+ ]
+}

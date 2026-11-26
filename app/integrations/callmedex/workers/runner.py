@@ -145,6 +145,9 @@ class CallMedexWorkerRunner:
         self, request: ProcessReportRequest, correlation_id: Optional[str] = None
     ) -> ProcessReportResponse:
         """Execute a report processing job following the connector-agnostic 9-step lifecycle with recovery checkpoints."""
+        from app.integrations.callmedex.switch import callmedex_enabled
+        if not await callmedex_enabled():
+            raise RuntimeError("CallMedex integration is switched off by the platform owner")
         report_job_id = str(uuid4())
         corr_id = correlation_id or str(uuid4())
         connector_type = request.connector_type or "mocdoc"
@@ -536,6 +539,11 @@ class CallMedexWorkerRunner:
         released on failure so CallMedex's retry worker can resubmit.
         """
         report_job_id = request.report_job_id
+        from app.integrations.callmedex.switch import callmedex_enabled
+        if not await callmedex_enabled():
+            logger.warning(f"CallMedex v1 job {report_job_id} dropped: integration switched off by the owner")
+            set_job_status_record(report_job_id, "failed", failure_reason="integration_disabled")
+            return
         corr_id = correlation_id or str(uuid4())
         callbacks = self.container.callback_handler
         lock_name = report_job_lock_name(report_job_id)

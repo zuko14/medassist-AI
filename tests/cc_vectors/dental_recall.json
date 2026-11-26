@@ -1,0 +1,36 @@
+{
+ "pack": "dental_recall",
+ "cases": [
+  {
+   "name": "recall due at 181 d",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -181,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "has": [
+     "recall_due"
+    ]
+   }
+  },
+  {
+   "name": "seen 100 d ago",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {},
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -100,
+   "unanswered": 0,
+   "expect": {
+    "reasons": []
+   }
+  }
+ ]
+}

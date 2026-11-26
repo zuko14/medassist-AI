@@ -10,6 +10,7 @@ from app.models.message import WhatsAppWebhookPayload
 from app.services.conversation import conversation_manager
 from app.services.whatsapp import whatsapp_service
 from app.services.tenant import resolve_tenant, TenantNotFound
+from app.integrations.callmedex.switch import callmedex_enabled
 from app.integrations.callmedex.whatsapp.booking import (
     cached_callmedex_number,
     is_callmedex_number,
@@ -227,6 +228,9 @@ async def process_message(message, display_phone: str, phone_number_id: str = No
         # exact CallMedex phone_number_id matches (never an id any clinic owns),
         # so every clinic message continues below completely unchanged.
         if await is_callmedex_number(phone_number_id):
+            if not await callmedex_enabled():
+                logger.info(f"Webhook: CallMedex message {message_id} ignored — integration switched off by the owner")
+                return
             if not await message_queue.acquire(message_id, clinic_id=None):
                 logger.info(f"Webhook: duplicate CallMedex message {message_id} dropped by atomic queue")
                 return
@@ -308,6 +312,10 @@ async def process_message(message, display_phone: str, phone_number_id: str = No
                 reply = message.interactive.list_reply
                 content = reply.get("title", "")
                 interactive_data = {"id": reply.get("id"), "type": "list_reply"}
+        elif message_type == "image" and isinstance(getattr(message, "image", None), dict):
+            # A photo's media id (fetched later only by pharmacy staff, RXR-ADR-6); the caption stays out of `content`.
+            interactive_data = {"type": "image", "media_id": str(message.image.get("id") or "")[:200] or None,
+                                "caption": (message.image.get("caption") or "")[:300]}
         elif message_type == "location" and isinstance(message.location, dict):
             # A shared pin (home sample collection). The address stays out of
             # `content` so it is never written to the processing log below.

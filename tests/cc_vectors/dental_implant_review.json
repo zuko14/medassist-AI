@@ -1,0 +1,44 @@
+{
+ "pack": "dental_implant_review",
+ "cases": [
+  {
+   "name": "suture review missed",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "placed_on": "d:-12"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "suture_review_due"
+    ],
+    "not": [
+     "three_month_review_due"
+    ]
+   }
+  },
+  {
+   "name": "suture review attended",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "placed_on": "d:-12"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": -3,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  }
+ ]
+}

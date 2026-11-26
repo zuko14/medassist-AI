@@ -22,6 +22,10 @@ class CallMedexCallbackHandler(BaseCallbackHandler):
         self, payload: CallbackStatusPayload
     ) -> bool:
         """Dispatch signed status callback to callback endpoint."""
+        from app.integrations.callmedex.switch import callmedex_enabled
+        if not await callmedex_enabled():
+            logger.info(f"CallMedex switched off by the owner — status callback for task {payload.task_id} not sent")
+            return False
         raw_body = payload.model_dump_json().encode("utf-8")
         signature = hmac.new(
             self.secret.encode("utf-8"), raw_body, hashlib.sha256

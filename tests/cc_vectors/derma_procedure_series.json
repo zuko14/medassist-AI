@@ -1,0 +1,64 @@
+{
+ "pack": "derma_procedure_series",
+ "cases": [
+  {
+   "name": "session overdue (28 + 7)",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "sessions_done": 2,
+    "sessions_planned": 6,
+    "last_session_on": "d:-36"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "watch",
+    "has": [
+     "session_overdue"
+    ]
+   }
+  },
+  {
+   "name": "on the grace boundary",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "sessions_done": 2,
+    "sessions_planned": 6,
+    "last_session_on": "d:-35"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  },
+  {
+   "name": "series complete",
+   "params": {},
+   "obs": [],
+   "labs": [],
+   "extra": {
+    "sessions_done": 6,
+    "sessions_planned": 6,
+    "last_session_on": "d:-90"
+   },
+   "baseline": {},
+   "enrolled": -30,
+   "last_visit": null,
+   "unanswered": 0,
+   "expect": {
+    "tier": "stable",
+    "reasons": []
+   }
+  }
+ ]
+}

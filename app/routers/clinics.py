@@ -60,7 +60,7 @@ class CreateClinicRequest(BaseModel):
     plan: Literal[
         "soloclinic", "diagstream", "diagbooking", "essential", "polyclinic",
         "enterprise", "derma", "eye", "dental", "ivf", "multispecialty",
-        "womenchild",
+        "womenchild", "pharmacy",
     ] = "soloclinic"
     meta_phone_number_id: str
     meta_access_token: str
@@ -309,7 +309,7 @@ class UpdateClinicRequest(BaseModel):
         Literal[
             "soloclinic", "diagstream", "diagbooking", "essential", "polyclinic",
             "enterprise", "derma", "eye", "dental", "ivf", "multispecialty",
-            "womenchild",
+            "womenchild", "pharmacy",
         ]
     ] = None
     is_active: Optional[bool] = None

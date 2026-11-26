@@ -5487,6 +5487,339 @@
    "expect": "action:rx.sell",
    "lang": "en",
    "near": "rx.find_bill"
+  },
+  {
+   "text": "what was not billed yesterday",
+   "expect": "action:ri.yesterday",
+   "lang": "en"
+  },
+  {
+   "text": "unbilled yesterday",
+   "expect": "action:ri.yesterday",
+   "lang": "en"
+  },
+  {
+   "text": "show revenue leakage",
+   "expect": "action:ri.yesterday",
+   "lang": "en"
+  },
+  {
+   "text": "kal kitna bill nahi hua",
+   "expect": "action:ri.yesterday",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ninna bill kaala entha",
+   "expect": "action:ri.yesterday",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open revenue guard",
+   "expect": "nav:riguard",
+   "lang": "en",
+   "near": "ri.yesterday"
+  },
+  {
+   "text": "unpaid bills",
+   "expect": "action:opd.unpaid",
+   "lang": "en",
+   "near": "ri.yesterday"
+  },
+  {
+   "text": "who is overdue today",
+   "expect": "action:cc.radar_today",
+   "lang": "en"
+  },
+  {
+   "text": "show overdue follow ups",
+   "expect": "action:cc.radar_today",
+   "lang": "en"
+  },
+  {
+   "text": "overdue follow ups please",
+   "expect": "action:cc.radar_today",
+   "lang": "en"
+  },
+  {
+   "text": "aaj kaun follow up se chhoot gaya",
+   "expect": "action:cc.radar_today",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ivala follow up miss ayyaru",
+   "expect": "action:cc.radar_today",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open care radar",
+   "expect": "nav:ccradar",
+   "lang": "en",
+   "near": "cc.radar_today"
+  },
+  {
+   "text": "who has not replied to care messages",
+   "expect": "action:cc.not_responding",
+   "lang": "en",
+   "near": "cc.radar_today"
+  },
+  {
+   "text": "any urgent care cases",
+   "expect": "action:cc.urgent_cases",
+   "lang": "en"
+  },
+  {
+   "text": "urgent care cases",
+   "expect": "action:cc.urgent_cases",
+   "lang": "en"
+  },
+  {
+   "text": "show urgent cases in care",
+   "expect": "action:cc.urgent_cases",
+   "lang": "en"
+  },
+  {
+   "text": "urgent care case kitne hain",
+   "expect": "action:cc.urgent_cases",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "urgent care cases enni unnayi",
+   "expect": "action:cc.urgent_cases",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open care queue",
+   "expect": "nav:ccqueue",
+   "lang": "en",
+   "near": "cc.urgent_cases"
+  },
+  {
+   "text": "open doctor inbox",
+   "expect": "nav:ccinbox",
+   "lang": "en",
+   "near": "cc.urgent_cases"
+  },
+  {
+   "text": "how many need my approval",
+   "expect": "action:cc.inbox_count",
+   "lang": "en"
+  },
+  {
+   "text": "patients waiting for my approval",
+   "expect": "action:cc.inbox_count",
+   "lang": "en"
+  },
+  {
+   "text": "my care approvals",
+   "expect": "action:cc.inbox_count",
+   "lang": "en"
+  },
+  {
+   "text": "meri approval kitne patients ki",
+   "expect": "action:cc.inbox_count",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "naa approval kosam enta mandi",
+   "expect": "action:cc.inbox_count",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open doctor inbox",
+   "expect": "nav:ccinbox",
+   "lang": "en",
+   "near": "cc.inbox_count"
+  },
+  {
+   "text": "open care protocols",
+   "expect": "nav:ccprotocols",
+   "lang": "en",
+   "near": "cc.inbox_count"
+  },
+  {
+   "text": "care programme results this month",
+   "expect": "action:cc.outcomes_month",
+   "lang": "en"
+  },
+  {
+   "text": "care results this month",
+   "expect": "action:cc.outcomes_month",
+   "lang": "en"
+  },
+  {
+   "text": "care outcomes this month",
+   "expect": "action:cc.outcomes_month",
+   "lang": "en"
+  },
+  {
+   "text": "is mahine care ka result",
+   "expect": "action:cc.outcomes_month",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ee nela care phalitalu",
+   "expect": "action:cc.outcomes_month",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open care outcomes",
+   "expect": "nav:ccoutcomes",
+   "lang": "en",
+   "near": "cc.outcomes_month"
+  },
+  {
+   "text": "open care setup",
+   "expect": "nav:ccsetup",
+   "lang": "en",
+   "near": "cc.outcomes_month"
+  },
+  {
+   "text": "who has not replied to care messages",
+   "expect": "action:cc.not_responding",
+   "lang": "en"
+  },
+  {
+   "text": "patients not responding to care",
+   "expect": "action:cc.not_responding",
+   "lang": "en"
+  },
+  {
+   "text": "care messages not answered",
+   "expect": "action:cc.not_responding",
+   "lang": "en"
+  },
+  {
+   "text": "kisne care ki reply nahi di",
+   "expect": "action:cc.not_responding",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "evaru care ki reply raledu",
+   "expect": "action:cc.not_responding",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open care radar",
+   "expect": "nav:ccradar",
+   "lang": "en",
+   "near": "cc.not_responding"
+  },
+  {
+   "text": "open patients in care",
+   "expect": "nav:ccpatients",
+   "lang": "en",
+   "near": "cc.not_responding"
+  },
+  {
+   "text": "are any spectacles ready",
+   "expect": "action:sp.optical_ready",
+   "lang": "en"
+  },
+  {
+   "text": "which glasses ready to collect",
+   "expect": "action:sp.optical_ready",
+   "lang": "en"
+  },
+  {
+   "text": "optical orders ready today",
+   "expect": "action:sp.optical_ready",
+   "lang": "en"
+  },
+  {
+   "text": "kitne chashma ready hain",
+   "expect": "action:sp.optical_ready",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ee roju kalla jodu ready aa",
+   "expect": "action:sp.optical_ready",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open optical job board",
+   "expect": "nav:speye",
+   "lang": "en",
+   "near": "sp.optical_ready"
+  },
+  {
+   "text": "open eye exam",
+   "expect": "nav:speye",
+   "lang": "en",
+   "near": "sp.optical_ready"
+  },
+  {
+   "text": "instalments due this week",
+   "expect": "action:sp.instalments_due",
+   "lang": "en"
+  },
+  {
+   "text": "which installments due this week",
+   "expect": "action:sp.instalments_due",
+   "lang": "en"
+  },
+  {
+   "text": "emi due this week list",
+   "expect": "action:sp.instalments_due",
+   "lang": "en"
+  },
+  {
+   "text": "kitni kisht baaki hai",
+   "expect": "action:sp.instalments_due",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ee nela vaayidalu baaki enni",
+   "expect": "action:sp.instalments_due",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open session packages",
+   "expect": "nav:spshared",
+   "lang": "en",
+   "near": "sp.instalments_due"
+  },
+  {
+   "text": "open clinical photos",
+   "expect": "nav:spshared",
+   "lang": "en",
+   "near": "sp.instalments_due"
+  },
+  {
+   "text": "licence renewal list",
+   "expect": "action:sp.licences_due",
+   "lang": "en"
+  },
+  {
+   "text": "which licences expiring soon",
+   "expect": "action:sp.licences_due",
+   "lang": "en"
+  },
+  {
+   "text": "aerb renewal date",
+   "expect": "action:sp.licences_due",
+   "lang": "en"
+  },
+  {
+   "text": "licence ka renewal kab hai",
+   "expect": "action:sp.licences_due",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "licence renewal eppudu",
+   "expect": "action:sp.licences_due",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "open health camps",
+   "expect": "nav:spshared",
+   "lang": "en",
+   "near": "sp.licences_due"
+  },
+  {
+   "text": "open before after photos",
+   "expect": "nav:spshared",
+   "lang": "en",
+   "near": "sp.licences_due"
   }
  ],
  "doctors": [

@@ -566,6 +566,47 @@ class DataRetentionService:
             # The erasure itself succeeded; losing its compliance record must be visible.
             logger.error(f"DPDP erasure audit log write FAILED: {audit_err}")
 
+        # 7. New-lane rows (after the audit record, so the steps above are unchanged for every clinic; best effort and
+        #    silent in `results` before migrations 144 / 149 are applied). Continuous Care first: cc_purge_patient stops
+        #    every prompt and removes the person's CC rows (VERIFICATION D6, CC-61). Then legacy records staff linked to
+        #    this patient (migration 144) whatever phone they carry: the FK cascade removes their imported visits, lab
+        #    values, dues and candidates.
+        if patient and patient.get("id"):
+            try:
+                # only a clinic whose owner ever toggled Continuous Care (the features key stays after OFF), so an
+                # erasure at any other clinic makes no cc_* call (VERIFICATION zero-impact matrix)
+                from app.services.tenant import get_clinic_by_id
+                feats = ((await get_clinic_by_id(clinic_id)) or {}).get("features") or {}
+                cc = None
+                if isinstance(feats, dict) and "care_enabled" in feats:
+                    cc = await sb(supabase.table("cc_enrollments").select("id").eq("clinic_id", clinic_id)
+                                  .eq("patient_id", patient["id"]).limit(1))
+                if cc is not None and isinstance(cc.data, list) and cc.data:
+                    out = await sb(supabase.rpc("cc_purge_patient", {"p_clinic_id": clinic_id,
+                                                                     "p_patient_id": patient["id"],
+                                                                     "p_family_member_id": None}))
+                    results["care_rows_purged"] = out.data
+            except Exception as e:
+                logger.warning(f"Continuous Care erasure step skipped: {type(e).__name__}")
+            try:
+                # Specialty OS (migrations 151–155): clinical photos + their consents, estimates, camp entries — only at
+                # a clinic whose owner ever toggled it (the features key stays after OFF), so other clinics make no call
+                if isinstance(feats, dict) and "specialty_os" in feats:
+                    from app.services import sp
+                    results["specialty_rows_purged"] = await sp.erase_patient(clinic_id, patient["id"])
+            except Exception as e:
+                logger.warning(f"Specialty OS erasure step skipped: {type(e).__name__}")
+            try:
+                linked = await sb(scoped_query("mi_patient_links", clinic_id, "patient_record_id")
+                                  .eq("patient_id", patient["id"]))
+                ids = [r["patient_record_id"] for r in (linked.data if isinstance(linked.data, list) else [])
+                       if isinstance(r, dict)]
+                if ids:
+                    lr = await sb(supabase.table("patient_records").delete().eq("clinic_id", clinic_id).in_("id", ids))
+                    results["patient_records_deleted"] = results.get("patient_records_deleted", 0) + len(lr.data or [])
+            except Exception as e:
+                logger.warning(f"Linked legacy records erasure step skipped: {type(e).__name__}")
+
         logger.info(
             f"Data retention: anonymized records for phone={phone[:6]}*** "
             f"in clinic={clinic_id}: {results}"
