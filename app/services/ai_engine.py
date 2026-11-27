@@ -603,6 +603,7 @@ EMERGENCY_KEYWORDS = [
     "baby turned blue",
     "baby is blue",
     "convulsion",
+    "convulsing",
     # Hindi
     "खून बह",
     "बेहोश",
@@ -861,14 +862,75 @@ _TEST_WORDS = re.compile(
 )
 
 
+def _kw_found(text_lower: str, kw: str) -> bool:
+    """The voice rule (app/voice/dates._pattern): an ASCII keyword matches only as a whole word ("fits" not in
+    "benefits", "stop" not in "Christopher"); Telugu / Hindi match as a substring, because case suffixes attach."""
+    if kw.isascii():
+        return re.search(rf"(?<![a-z]){re.escape(kw)}(?![a-z])", text_lower) is not None
+    return kw in text_lower
+
+
+def _kw_inflected(text_lower: str, kw: str) -> bool:
+    """Whole word plus a common English ending ("cancelled", "rescheduling", "postponed"); Indic: substring."""
+    if kw.isascii():
+        return re.search(rf"(?<![a-z]){re.escape(kw)}(?:s|es|d|ed|led|ing|ling)?(?![a-z])", text_lower) is not None
+    return kw in text_lower
+
+
+def contains_emergency(text: str) -> bool:
+    """Whole word plus a plural ("seizures", "convulsions" must fire; "benefits" must not fire "fits").
+    Shared by WhatsApp and the voice safety screen."""
+    low = (text or "").lower()
+    for kw in EMERGENCY_KEYWORDS:
+        if kw.isascii():
+            if re.search(rf"(?<![a-z]){re.escape(kw)}(?:s|es)?(?![a-z])", low):
+                return True
+        elif kw in low:
+            return True
+    return False
+
+
+# Opt-out unsubscribes the patient from any state, so it fires only on an unmistakable request: the whole message
+# is a STOP word, or it names messaging. "my pain has not stopped" and a patient called Christopher are not opt-outs.
+_OPT_OUT_WHOLE = frozenset({"stop", "stop all", "stop it", "unsubscribe", "opt out", "optout", "opt-out",
+                            "रुको", "ఆపు", "వద్దు"})
+_OPT_OUT_PHRASES = ("unsubscribe", "opt out", "opt-out", "don't message", "dont message", "do not message",
+                    "stop messag", "stop sending", "no more messages", "stop whatsapp", "stop texting")
+
+
+def is_opt_out(text: str) -> bool:
+    low = (text or "").lower().strip()
+    norm = re.sub(r"^(?:please|pls|plz)\s+|\s+(?:please|pls|plz)$", "", re.sub(r"[.!?,]+", "", low)).strip()
+    return norm in _OPT_OUT_WHOLE or any(p in low for p in _OPT_OUT_PHRASES)
+
+
+# Queue status answers from any state ahead of the model, so it needs a queue word, not "status" or "waiting" inside
+# a sentence about a report. Bare one-word status questions keep their old meaning.
+_QUEUE_RE = re.compile(
+    r"(?<![a-z])(?:tokens?|queue|my turn|turn (?:come|coming|near|now|soon)|(?:patients?|people|persons?) ahead"
+    r"|ahead of me|how many ahead|waiting time|wait time|how long .{0,25}wait(?:ing)?)(?![a-z])"
+)
+_QUEUE_WHOLE = frozenset({"status", "my status", "waiting", "turn", "my number"})
+_QUEUE_INDIC = ("टोकन", "कतार", "టోకెన్", "క్యూ")
+
+
+def is_queue_status(text: str) -> bool:
+    low = (text or "").lower().strip()
+    return (bool(_QUEUE_RE.search(low)) or re.sub(r"[.!?]+$", "", low) in _QUEUE_WHOLE
+            or any(k in low for k in _QUEUE_INDIC))
+
+
+#: Intents whose keyword lists are too broad for substring matching; each has its own predicate above.
+_STRICT_INTENTS = {"queue_status": is_queue_status, "emergency": contains_emergency, "opt_out": is_opt_out}
+
+
 def keyword_intent_fallback(message: str, clinic: Optional[dict] = None) -> str:
     """Fallback intent detection using keywords when OpenRouter fails."""
     msg = message.lower().strip()
 
     # Emergency check first — always
-    for kw in EMERGENCY_KEYWORDS:
-        if kw in msg:
-            return "emergency"
+    if contains_emergency(message):
+        return "emergency"
 
     # A question ABOUT the clinic, checked ahead of the action intents below:
     # several of their keywords ("timing", "when", "services", "cost") sit
@@ -879,10 +941,23 @@ def keyword_intent_fallback(message: str, clinic: Optional[dict] = None) -> str:
     if detect_topic(message, clinic):
         return "clinic_info"
 
+    # A specific verb beats a generic noun: "cancel my appointment" is a cancellation, not a booking, and
+    # "reschedule" must not be read as doctor_availability's "schedule". Whole words with inflections only, so
+    # "move" never fires inside "remove". Only this offline fallback; the model path is unchanged.
+    # (followup_booking stays in its old place: "review" / "checkup" must keep meaning reports / booking.)
+    for intent in ("data_deletion_request", "cancel_appointment", "reschedule_appointment"):
+        if any(_kw_inflected(msg, kw) for kw in INTENT_KEYWORDS[intent]):
+            return intent
+
     # Check other intents
     for intent, keywords in INTENT_KEYWORDS.items():
+        if intent in _STRICT_INTENTS:
+            if _STRICT_INTENTS[intent](message):
+                return intent
+            continue
         for kw in keywords:
-            if kw in msg:
+            # greetings are short ASCII words ("hi" must not match "Hitesh" or "this")
+            if (_kw_found(msg, kw) if intent == "greeting" else kw in msg):
                 return intent
 
     # After every keyword above, so "test report", "book test" and "cancel
@@ -905,9 +980,7 @@ def keyword_symptom_fallback(symptom: str) -> dict:
     symptom_lower = symptom.lower().strip()
 
     # Check for emergency keywords first
-    is_emergency = any(
-        kw in symptom_lower or kw in symptom for kw in EMERGENCY_KEYWORDS
-    )
+    is_emergency = contains_emergency(symptom)
 
     # Find matching department
     for keyword, (dept, could_be_emergency) in SYMPTOM_DEPARTMENT_MAP.items():
@@ -950,17 +1023,14 @@ async def detect_intent(message: str, clinic: Optional[dict] = None) -> str:
     msg_clean = message.lower().strip()
 
     # Fast-path 1: Emergency triggers immediately — zero latency, patient safety first
-    for kw in EMERGENCY_KEYWORDS:
-        if kw in msg_clean:
-            return "emergency"
+    if contains_emergency(message):
+        return "emergency"
 
     # Fast-path 2: Check high-precision exact keywords (queue, opt-out, deletion)
-    for kw in INTENT_KEYWORDS.get("queue_status", []):
-        if kw in msg_clean:
-            return "queue_status"
-    for kw in INTENT_KEYWORDS.get("opt_out", []):
-        if kw in msg_clean:
-            return "opt_out"
+    if is_queue_status(message):
+        return "queue_status"
+    if is_opt_out(message):
+        return "opt_out"
     for kw in INTENT_KEYWORDS.get("data_deletion_request", []):
         if kw in msg_clean:
             return "data_deletion_request"

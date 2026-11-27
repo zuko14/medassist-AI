@@ -10,6 +10,7 @@ required slot becomes a clarify form. A question about a write is answered with
 help, never executed. Negated and hypothetical requests never route to a write.
 """
 
+import dataclasses
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,11 +29,20 @@ NEGATION = tuple(w for w in W["DENY"] if w not in _NOT_NEGATION) + (
     "do not",
     # "Dr Rao is not on leave" must never preview the opposite (plain "not" stays out: it opens corrections).
     "not on leave", "isn't on leave", "not be on leave", "chutti nahi", "chutti nahin", "selavu ledu",
+    # "no need to refund him": a refusal, unlike a bare "no" / "not needed" (corrections, above)
+    "no need to", "don't need to", "dont need to", "do not need to", "need not",
     "సెలవు లేదు", "छुट्टी नहीं", "छुट्टी पर नहीं")
 HYPOTHETICAL = ("what if", "what happens if", "what would happen if", "suppose", "supposing", "in case",
                 "agar", "अगर", "okavela", "ఒకవేళ")
 _ONLY_DOES = re.compile(r"\bonly\b.*\b(?:does|do)\b", re.I)
-HOW_TO = ("how do i", "how do we", "how to", "how can i", "how should i", "ela", "ఎలా", "kaise", "कैसे")
+HOW_TO = ("how do i", "how do we", "how to", "how can i", "how should i", "ela", "ఎలా", "kaise", "कैसे",
+          "steps to", "steps for", "where do i", "where can i", "where should i", "procedure to", "process to")
+# "if I mark Dr Kiran on leave, will patients get a message?" asks about a consequence; it is not the change.
+_IF_I_QUESTION = re.compile(r"^\s*(?:if|when)\s+(?:i|we)\b", re.I)
+_CONSEQUENCE = re.compile(r"\b(?:will|would|does|what happens|get a message|be informed|be notified)\b")
+# "can I give a refund" is billing, not a medicine question (MEDICINE_ADVICE holds "can i give").
+_ADMIN_GIVE = re.compile(r"\b(?:can|could)\s+(?:i|we)\s+give\s+(?:\w+\s+){0,3}?(?:refund|discount|concession|receipt|"
+                         r"bill|invoice|appointment|token|slot|leave|access|login|credit|waiver)s?\b")
 # Staff-side additions to the patient firewall: Kriya never diagnoses, prescribes or tells the sex of a foetus.
 CLINICAL = ("diagnose", "diagnosis", "prescribe", "prescription for", "which tablet", "which medicine",
             "what medicine", "dosage", "dose of", "boy or girl", "ladka ya ladki", "ladka hai ya ladki",
@@ -689,7 +699,7 @@ def follow_up(spec: ActionSpec, missing, text: str, given: dict, *, doctors=None
 
 def route(text: str, *, visible_pages: Optional[list] = None, ui_page: Optional[str] = None,
           actions: Optional[dict] = None, doctors: Optional[list] = None,
-          now: Optional[datetime] = None) -> Route:
+          now: Optional[datetime] = None, learned: Optional[list] = None) -> Route:
     """Route one staff instruction. `actions` = the actions this user may run (default: registry);
     `visible_pages` = the sidebar pages the user can see (None = unknown, navigation allowed)."""
     actions = {k: s for k, s in (REGISTRY if actions is None else actions).items() if s.triggers}
@@ -699,27 +709,29 @@ def route(text: str, *, visible_pages: Optional[list] = None, ui_page: Optional[
     now = now or _now()
     lead = strip_spoken_lead(text)
     if lead.strip() and lead != text:
-        return route(lead, visible_pages=visible_pages, ui_page=ui_page, actions=actions, doctors=doctors, now=now)
+        return route(lead, visible_pages=visible_pages, ui_page=ui_page, actions=actions, doctors=doctors, now=now,
+                     learned=learned)
     t = _norm(text)
     if not t:
         return Route("none")
     if is_sex_determination_request(text) or has_any(t, CLINICAL):
         return Route("rejected", error_code="clinical")
-    if has_any(t, MEDICINE_ADVICE):       # after the clinical words, whose wording "dose of …" questions keep
+    if has_any(_ADMIN_GIVE.sub(" ", t), MEDICINE_ADVICE):  # after the clinical words ("dose of …" keeps them)
         return Route("rejected", error_code="medicine_advice")
     pharmacy_ask = has_any(t, PHARMACY_ASK) or ("bill" in t and "prescription" in t)
     if not pharmacy_ask and screen_message(text)[0]:
         return Route("rejected", error_code="clinical")
     if _negated(t, text):
         return Route("rejected", error_code="negated")
-    if has_any(t, HYPOTHETICAL):
+    if has_any(t, HYPOTHETICAL) or (_IF_I_QUESTION.match(text) and (asks(text) or _CONSEQUENCE.search(t))):
         return Route("rejected", error_code="hypothetical")
     chat = small_talk(text)
     if chat:  # the router answers it (what this user can do); nothing is routed or executed
         return Route("help", error_code=chat)
     rest = _GREETING_PREFIX.sub("", text, count=1)
     if rest.strip() and rest != text:
-        return route(rest, visible_pages=visible_pages, ui_page=ui_page, actions=actions, doctors=doctors, now=now)
+        return route(rest, visible_pages=visible_pages, ui_page=ui_page, actions=actions, doctors=doctors, now=now,
+                     learned=learned)
     if has_any(t, HOW_TO):
         entry = _help(t, visible)
         if entry:
@@ -749,7 +761,17 @@ def route(text: str, *, visible_pages: Optional[list] = None, ui_page: Optional[
     matched = _match_action(text, t, actions, ui_page, doctors, now, visible)
     if matched.kind != "none":
         return matched
-    return _nav(page, visible) if page else Route("none")
+    if page:
+        return _nav(page, visible)
+    if learned:  # migration 159: this clinic's approved phrases, only when nothing built-in matched
+        extra: dict[str, list] = {}
+        for phrase, action_id in learned:
+            if action_id in actions:
+                extra.setdefault(action_id, []).append(phrase)
+        if extra:
+            taught = {a: dataclasses.replace(actions[a], triggers=tuple(p)) for a, p in extra.items()}
+            return _match_action(text, t, taught, ui_page, doctors, now, visible)
+    return Route("none")
 
 
 def wants_doctors(text: str) -> bool:

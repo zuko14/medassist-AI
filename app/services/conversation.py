@@ -29,6 +29,7 @@ from app.services.ai_engine import (
     language_change_request,
     map_symptom_to_department,
     EMERGENCY_KEYWORDS,
+    contains_emergency,
 )
 from app.services.whatsapp import whatsapp_service
 from app.templates.whatsapp_templates import cancellation_policy_line, get_message
@@ -2875,7 +2876,7 @@ class ConversationManager:
 
         # Check if emergency FIRST
         msg_lower = message.lower().strip()
-        is_emergency = any(kw in msg_lower for kw in EMERGENCY_KEYWORDS)
+        is_emergency = contains_emergency(message)
         if is_emergency:
             await self._handle_emergency(clinic, phone, lang)
             return

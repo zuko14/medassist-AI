@@ -31,7 +31,7 @@ from app.database import (
     supabase,
     update_conversation,
 )
-from app.services.ai_engine import EMERGENCY_KEYWORDS, is_greeting, rank_treatments_for_concern
+from app.services.ai_engine import contains_emergency, is_greeting, rank_treatments_for_concern
 from app.services.specialty_catalog import CONCERN_EXAMPLES, CONCERN_EXAMPLES_BY_PLAN, SERVICE_LINES
 from app.services.tenant import SPECIALTY_BY_PLAN, specialty_enabled
 
@@ -911,7 +911,7 @@ async def prompt_concern(manager, clinic: dict, phone: str, lang: str) -> None:
 
 async def handle_treatment_search_text(manager, clinic: dict, phone: str, message: str, lang: str) -> None:
     query = (message or "").strip()[:200]
-    if any(kw in query.lower() for kw in EMERGENCY_KEYWORDS):
+    if contains_emergency(query):
         await manager._handle_emergency(clinic, phone, lang)
         return
     if len(query) < 3:

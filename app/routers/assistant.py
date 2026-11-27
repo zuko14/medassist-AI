@@ -25,11 +25,11 @@ from typing import Annotated, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.assistant import executor, llm, playbooks, policy, resolve, rules, store, stt
+from app.assistant import executor, learning, llm, playbooks, policy, resolve, rules, store, stt
 from app.assistant.executor import Call, CallerAuth
 from app.assistant.registry import PAGES, REGISTRY, VARIANTS, read_only_post
 from app.config import settings
-from app.routers.admin import AdminUser, enforce_clinic_access, verify_credentials
+from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, require_admin, verify_credentials
 from app.services.ai_gateway import check_admin_spend_cap, record_ai_usage_bg
 from app.services.tenant import get_clinic_by_id, kriya_ketu_enabled
 from app.utils.security import PersistentRateLimiter
@@ -282,6 +282,15 @@ async def _route(body: RequestIn, scope: str, user: AdminUser, clinic: dict, aut
         continued = await _follow_up(body, scope, user, clinic, auth, run_id)
         if continued is not None:
             return continued
+    if r.kind == "none":  # migration 159: a phrase this clinic's admin taught Ketu replaces the LLM call, nothing else
+        learned = await learning.active_phrases(scope)
+        if learned:
+            if doctors is None and learning.needs_doctors(learned):
+                doctors = await _doctors(auth, scope, run_id)
+            taught = _variant(rules.route(body.text, visible_pages=visible, ui_page=body.ui_context.page or None,
+                                          doctors=doctors, learned=learned), clinic)
+            if taught.kind != "none":
+                return _with_chat(_fields(taught, "rules"), user, clinic)
 
     out = await llm.classify(body.text, clinic_id=scope, username=user.username,
                              action_ids=policy.permitted_actions(user, clinic), visible_pages=visible,
@@ -967,3 +976,75 @@ async def transcribe(request: Request, clinic_id: str = "default",
     logger.info(f"ASSISTANT_STT status=ok lang={heard.language} chars={len(heard.text)} mime={mime} bytes={size} "
                 f"audio_ms={duration_ms} ms={int((time.monotonic() - started) * 1000)}")
     return {"text": heard.text, "language": heard.language, "duration_ms": duration_ms}
+
+
+# ── Learning (migration 159): phrases staff use that the rules did not know ──────────────────────────────────
+
+class LearnedChoiceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    phrase: str = Field(..., min_length=3, max_length=80)
+    action_id: str = Field(..., min_length=3, max_length=60)
+
+
+async def _learning_suggestions(scope: str) -> list[dict]:
+    from app.database import sb, scoped_query
+    docs = await sb(scoped_query("doctors", scope).select("name").limit(500))
+    return await learning.load_suggestions(scope, [d["name"] for d in (docs.data or []) if d.get("name")])
+
+
+@router.get("/learning")
+async def list_learning(clinic_id: str = "default", user: AdminUser = Depends(require_admin)):
+    """Suggestions (computed now, from confirmed runs) and the phrases already taught. Clinic admins only."""
+    from app.database import sb, scoped_query
+    scope, _ = await _scope(user, clinic_id)
+    taught = await sb(scoped_query("assistant_learned_phrases", scope).select("id, phrase, action_id, evidence, "
+                      "decided_by, created_at").eq("status", "active").order("created_at", desc=True).limit(500))
+    label = lambda a: REGISTRY[a].summary if a in REGISTRY else a  # noqa: E731
+    return {"min_evidence": learning.MIN_EVIDENCE,
+            "suggestions": [{**s, "action": label(s["action_id"])} for s in await _learning_suggestions(scope)],
+            "learned": [{**r, "action": label(r["action_id"])} for r in (taught.data or [])]}
+
+
+async def _decide(body: LearnedChoiceIn, status: str, request: Request, clinic_id: str, user: AdminUser) -> dict:
+    from app.database import sb, supabase
+    scope, _ = await _scope(user, clinic_id)
+    chosen = learning.valid_choice(body.phrase, body.action_id, await _learning_suggestions(scope))
+    if chosen is None:
+        raise HTTPException(status_code=404, detail="That phrase is not a current suggestion.")
+    # unscoped: insert_scoped_by_payload
+    await sb(supabase.table("assistant_learned_phrases").upsert(
+        {"clinic_id": scope, "phrase": chosen["phrase"], "action_id": chosen["action_id"], "status": status,
+         "evidence": chosen["evidence"], "decided_by": user.username},
+        on_conflict="clinic_id,phrase,action_id", ignore_duplicates=True))
+    await log_admin_action(user, f"assistant_learning_{status}", "assistant_learned_phrase", None,
+                           {"phrase": chosen["phrase"], "action_id": chosen["action_id"]},
+                           request.client.host if request.client else "unknown")
+    return {"success": True, "status": status}
+
+
+@router.post("/learning/approve")
+async def approve_learning(body: LearnedChoiceIn, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(require_admin)):
+    return await _decide(body, "active", request, clinic_id, user)
+
+
+@router.post("/learning/dismiss")
+async def dismiss_learning(body: LearnedChoiceIn, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(require_admin)):
+    return await _decide(body, "dismissed", request, clinic_id, user)
+
+
+@router.delete("/learning/{phrase_id}")
+async def forget_learning(phrase_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(require_admin)):
+    """Stop using a taught phrase (Ketu falls back to the LLM for it again)."""
+    from app.database import sb, supabase
+    scope, _ = await _scope(user, clinic_id)
+    res = await sb(supabase.table("assistant_learned_phrases").delete().eq("clinic_id", scope)
+                   .eq("id", str(phrase_id)).eq("status", "active"))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Learned phrase not found.")
+    await log_admin_action(user, "assistant_learning_forget", "assistant_learned_phrase", str(phrase_id),
+                           {"phrase": res.data[0].get("phrase")},
+                           request.client.host if request.client else "unknown")
+    return {"success": True}

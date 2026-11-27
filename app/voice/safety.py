@@ -12,12 +12,12 @@ reviewed by the hospital's medical lead before go-live (STATUS gate G-MED-REVIEW
 
 from typing import Optional
 
-from app.services.ai_engine import EMERGENCY_KEYWORDS
+from app.services.ai_engine import contains_emergency
 from app.services.clinical_firewall import screen_message
 
 from .dates import has_any, norm
 
-SAFETY_VERSION = "safety-2026.10.06"
+SAFETY_VERSION = "safety-2026.11.27"
 
 # Phrases that are an emergency on their own.
 VOICE_EMERGENCY_PHRASES = (
@@ -41,7 +41,8 @@ def screen(text: str, lang: str = "en") -> Optional[str]:
     t = norm(text)
     if not t:
         return None
-    if has_any(t, VOICE_EMERGENCY_PHRASES) or has_any(t, tuple(EMERGENCY_KEYWORDS)):
+    # contains_emergency: whole word + plural, so "seizures" / "convulsions" fire (they did not before)
+    if has_any(t, VOICE_EMERGENCY_PHRASES) or contains_emergency(t):
         return "emergency"
     for parts, symptoms in _PAIRS:
         if has_any(t, parts) and has_any(t, symptoms):

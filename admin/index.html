@@ -1519,6 +1519,7 @@
         body.corp-viewer #notifBellBtn,
         body.corp-viewer #notifBadgeMobile { display: none !important; }
         #pg-corporate [hidden] { display: none !important; }
+        #pg-data [hidden] { display: none !important; }
         .corp-bar { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
         .corp-bar .corp-lbl { font-size: 0.72rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em; margin-right: 2px; }
         .corp-bar .range-pick { align-items: center; }
@@ -5399,6 +5400,7 @@
                 <button class="toggle-btn" data-dtab="records" onclick="setDataTab('records')">Imported patients</button>
                 <button class="toggle-btn" data-dtab="export" onclick="setDataTab('export')">Export data</button>
                 <button class="toggle-btn" data-dtab="support" onclick="setDataTab('support')">Messages to Kriya</button>
+                <button class="toggle-btn" data-dtab="ketu" onclick="setDataTab('ketu')" hidden>Kriya Ketu learning</button>
             </div>
 
             <div class="dtab" id="dtab-import">
@@ -5494,6 +5496,15 @@
                 <div class="card" style="margin-top:20px;">
                     <div class="card-head"><h3>Your messages</h3></div>
                     <div id="supportList" style="padding:12px 16px;"><div class="loader"><div class="spin"></div>Loading…</div></div>
+                </div>
+            </div>
+            <div class="dtab" id="dtab-ketu" style="display:none;">
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-head"><h3>Phrases your team uses</h3></div>
+                    <div style="padding:12px 16px;">
+                        <p style="color:var(--text2); font-size:0.88rem; margin:0 0 12px;">When Kriya Ketu needed AI to understand an instruction, and your staff then confirmed and completed it, the wording is collected here once three instructions share it. Approve a phrase and Ketu understands it instantly from then on, without AI, with the same preview and confirmation as before. Dismiss it and it is never suggested again.</p>
+                        <div id="ketuLearnList" aria-live="polite"><div class="loader"><div class="spin"></div>Loading…</div></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -25163,9 +25174,56 @@ function setDataTab(tab) {
     if (tab === 'import') loadImportHistory();
     if (tab === 'records') loadDataRecords();
     if (tab === 'support') loadSupportMessages();
+    if (tab === 'ketu') loadKetuLearning();
+}
+
+// Kriya Ketu learning (migration 159): clinic admins approve phrases Ketu then understands without AI.
+function ketuLearningAllowed() {
+    return !!myKetu && (myRole === 'clinic_admin' || myRole === 'super_admin');
+}
+
+async function loadKetuLearning() {
+    const el = document.getElementById('ketuLearnList');
+    el.innerHTML = loading();
+    let d;
+    try { d = await api('/admin/assistant/learning'); }
+    catch (e) { el.innerHTML = emptyState('warning', esc(e.message)); return; }
+    const row = (s, buttons) => `<tr><td data-label="Phrase"><b>“${esc(s.phrase)}”</b></td><td data-label="Means">${esc(s.action)}</td>`
+        + `<td data-label="Seen" class="num">${Number(s.evidence) || 0}</td><td data-label="">${buttons}</td></tr>`;
+    const table = (rows, empty) => rows.length
+        ? `<div class="tbl-wrap"><table class="dx-table"><thead><tr><th scope="col">Phrase</th><th scope="col">Means</th><th scope="col">Seen</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`
+        : emptyState('info', empty);
+    const sug = (d.suggestions || []).map((s, i) => row(s,
+        `<button type="button" class="btn btn-accent btn-sm" onclick="ketuLearnDecide(${i}, 'approve', this)">Approve</button> `
+        + `<button type="button" class="btn btn-ghost btn-sm" onclick="ketuLearnDecide(${i}, 'dismiss', this)">Dismiss</button>`));
+    const known = (d.learned || []).map(s => row(s,
+        `<button type="button" class="btn btn-ghost btn-sm" onclick="ketuLearnForget('${esc(s.id)}', this)">Stop using</button>`));
+    window._ketuLearnSug = d.suggestions || [];
+    el.innerHTML = `<h4 style="margin:0 0 8px;">To review</h4>${table(sug, 'Nothing to review. Ketu understands your team.')}`
+        + `<h4 style="margin:18px 0 8px;">Learned</h4>${table(known, 'No learned phrases yet.')}`;
+}
+
+async function ketuLearnDecide(i, verb, btn) {
+    const s = (window._ketuLearnSug || [])[i];
+    if (!s) return;
+    btn.disabled = true;
+    try {
+        await apiPost('/admin/assistant/learning/' + verb, { phrase: s.phrase, action_id: s.action_id });
+        toast(verb === 'approve' ? 'Learned. Ketu understands it from now on.' : 'Dismissed.');
+        loadKetuLearning();
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+}
+
+async function ketuLearnForget(id, btn) {
+    btn.disabled = true;
+    try { await apiDel('/admin/assistant/learning/' + encodeURIComponent(id)); toast('Ketu no longer uses that phrase.'); loadKetuLearning(); }
+    catch (e) { toast(e.message, true); btn.disabled = false; }
 }
 
 function loadDataPage() {
+    const ketuTab = document.querySelector('#pg-data [data-dtab="ketu"]');
+    if (ketuTab) ketuTab.hidden = !ketuLearningAllowed();
+    if (dataTab === 'ketu' && !ketuLearningAllowed()) dataTab = 'import';
     loadDataStorage();
     if (!document.getElementById('exportFrom').value) setExportPreset('this_month');
     onExportDatasetChange();
