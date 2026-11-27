@@ -385,8 +385,10 @@ async def resolve_admin_session(token: str) -> Optional[AdminUser]:
             .is_("revoked_at", "null"))
         )
     except Exception as e:
+        # Not "no session": answering None here made every database blip a 401 "Session expired", and the
+        # panel force-logs the user out on 401. Still denied, but as a retryable 503.
         logger.warning(f"Admin session lookup failed: {e}")
-        return None
+        raise HTTPException(status_code=503, detail="Sign-in check is temporarily unavailable. Please retry.")
 
     if not res.data:
         return None
@@ -3091,7 +3093,8 @@ async def delete_doctor(
         raise
     except Exception as e:
         msg = str(e).lower()
-        if "23503" in msg or "foreign key" in msg:
+        # 23514: the delete nulls appointments.doctor_id, which an OPD visit's check constraint forbids.
+        if "23503" in msg or "foreign key" in msg or "23514" in msg:
             raise HTTPException(
                 status_code=409,
                 detail="Doctor has OPD clinical or billing records — deactivate instead.",

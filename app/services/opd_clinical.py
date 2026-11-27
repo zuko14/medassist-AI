@@ -755,6 +755,17 @@ async def save_prescription_draft(
         )
         saved_rx = upd_res.data[0]
     else:
+        # A signed (or amended-away) version already exists: a fresh version 1 would hit the unique key and 500.
+        prior = await sb(
+            supabase.table("opd_prescriptions").select("id")
+            .eq("clinic_id", clinic_id).eq("encounter_id", encounter_id).limit(1)
+        )
+        if prior.data:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"error": "prescription_signed",
+                        "message": "This prescription is already signed. Use Amend to change it."},
+            )
         # Create draft header
         new_rx = {
             "clinic_id": clinic_id,

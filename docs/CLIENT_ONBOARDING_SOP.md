@@ -1,8 +1,8 @@
 # Kriya AI — Client Onboarding Standard Operating Procedure (SOP)
-**Document Version:** 5.0 (All Plans + OPD OS + Exotel Telephony & AI Voice Receptionist — verified against code 2026-10-11)  
+**Document Version:** 6.0 (13 plans incl. Pharmacy · Suggested module setup per plan · IPD / Diagnostic / Pharmacy / Continuous Care / Specialty OS go-live · owner plan change · clinic erase · CallMedex switch — verified against code and `tests/test_onboarding_every_plan.py` 2026-11-26)  
 **Provider:** Zuko Labs (Meta Tech Provider — Business ID: `1602916427428175`)  
 **Platform:** Kriya AI Multi-Tenant WhatsApp Healthcare Automation (App ID: `946290901317238`)  
-**Plans Covered:** soloclinic · diagstream · diagbooking · essential · polyclinic · enterprise · derma · eye · dental · ivf · multispecialty · womenchild
+**Plans Covered:** soloclinic · diagstream · diagbooking · essential · polyclinic · enterprise · derma · eye · dental · ivf · multispecialty · womenchild · pharmacy
 
 ---
 
@@ -17,11 +17,14 @@ Do the parts in this order for every new client. Tick each box; do not skip ahea
 | 2 | **Part A** — client's Meta steps 1–6 | Client | WABA shared with Zuko Labs |
 | 3 | **Part B** — steps 7–9 | You | Token, WABA ID, Phone Number ID, display number |
 | 4 | **Part C** — register the plan's templates (including OPD OS if needed) | You | Templates `APPROVED` |
-| 5 | **Part D** — create the clinic in the Platform Panel, then the post-create settings | You | Clinic UUID, admin username + password |
+| 5 | **Part D** — create the clinic in the Platform Panel (pharmacy: **+ Create pharmacy** wizard), then the post-create settings | You | Clinic UUID, admin username + password |
+| 5b | **Part D, Step 13c** — **Suggested setup**: tick the plan's modules and apply | You (owner decides) | Modules ON / CONFIGURING |
 | 6 | **Part E** — configure the clinic's admin panel for its plan | You / clinic admin | Doctors, prices, payments live |
 | 7 | **Part F** — live WhatsApp end-to-end verification | You | WhatsApp Go-live sign-off |
 | 8 | **Part H** — Exotel Telephony Linking & AI Voice Receptionist Setup *(if voice enabled)* | You + Owner | Exophone mapped, audio stream live, voice tested |
 | 9 | **Part I** — OPD OS Setup Wizard & Go-Live *(if OPD OS enabled)* | You / clinic admin | 14 checks green, dry-run passed, OPD live |
+| 9b | **Part K** — go-live for every other module switched on (IPD, Diagnostic, Pharmacy, Continuous Care, Specialty, Revenue Guard, Data import, Kriya Ketu) | You / clinic admin | Each module's checklist green |
+| 9c | **Part L** — later changes: plan change, CallMedex switch, offboarding / erase | Owner | Audited change |
 | 10 | **Part J** — Troubleshooting & Edge Cases | You | Issue resolution |
 
 Keep a per-client sheet with: plan · WABA ID · Phone Number ID · display number · clinic UUID · admin username (password handed to the client, not stored) · template names used · Razorpay webhook set (yes/no) · Exophone & reception number (if voice) · OPD OS state (if OPD).
@@ -79,11 +82,40 @@ These database migrations must be applied on production before the features belo
 | `104_opd_payment_exceptions.sql` | `opd_payment_exceptions` table with indexes and status tracking | Offline payment mismatch tracking, gateway reconciliation, and cashier exception handling. |
 | `105_opd_function_search_path.sql` | Search path security pinning on `assign_patient_mrn` and `opd_next_token_number` | Security — clears Supabase linter warning 0011; prevents search-path hijacking. |
 | `106_receptionist_continuous_learning.sql` | `ai_reception_harvest_events`, `ai_learning_suggestions`: **AI Receptionist Continuous Self-Improvement** | Additive. **Apply AND record before deploying** — harvests misunderstood caller turns, clusters suggestions, and enables 1-click promotion to `voice_lexicon_entries` or `voice_knowledge_entries`. |
+| `107`–`110` | Per-clinic uniqueness for doctor leaves and holidays, **Kriya Ketu** assistant (108), atomic config apply | All plans |
+| `111`–`124` | **IPD OS**: admissions, beds, nursing, investigation/procedure orders, IPD finance, GST billing + credit notes, LIS, clinical documents and coding, emergency, OT, radiology + PCPNDT, insurance / TPA cashless | `ipd_enabled` (Part K1) |
+| `125`–`133` | **Diagnostic OS**: catalogue, visits + billing, collection, logistics, result workflow, reports, B2B, instruments + QC | `dx_enabled` (Part K2) |
+| `134`–`142` | **Pharmacy OS**: catalogue, stock ledger, purchase, POS, IPD dispensing, transfers + audits, registers, refills + alerts | `pharmacy_enabled` (Part K3) |
+| `143_revenue_guard.sql` | Nightly unbilled-charge check | `revenue_guard` (Part K6) |
+| `144_data_import.sql` | "Switch to Kriya" import from the old system | `data_import` (Part K7) |
+| `145`–`149` | **Continuous Care**: enrolments, plans, measures, actions, outcome verification | `care_enabled` (Part K4) |
+| `150_retail_pharmacy.sql` | Adds the **`pharmacy` plan** (plan tier *Pharmacy / Medical Store*, 1,000 messages) and patient order requests | Pharmacy plan |
+| `151`–`156` | **Specialty OS** + packs: exam forms and media, packages + estimates, eye / dental, derma / IVF, antenatal / immunisation, optical | `specialty_os` + packs (Part K5) |
+| `157_clinic_erase.sql` | `kriya_erase_clinic()` — service-role only; erases one clinic's rows from every table | Owner **Delete → Erase permanently** (Part L3) |
+| `158_platform_switches.sql` | `platform_switches` table; row `callmedex` = **off** | Owner **CallMedex switch** (Part L2) |
 
-Verify on production: `SELECT name FROM schema_migrations WHERE name LIKE '08%' OR name LIKE '09%' OR name LIKE '10%' ORDER BY name;`
+Verify on production — one row per file in `migrations/` (`001` … `158` = 159 rows today, the newest must be `158_platform_switches.sql`):
 
-If a migration was run by hand in the Supabase SQL editor, record it (the pre-flight reads this table):
-`INSERT INTO schema_migrations (name, checksum) VALUES ('098_voice_receptionist.sql', 'manual') ON CONFLICT DO NOTHING;`
+```sql
+SELECT count(*) AS rows, max(name) AS newest FROM schema_migrations;
+```
+
+Apply with the project runner (it records each file with its SHA-256, exactly what Render's pre-deploy expects):
+
+```bash
+DATABASE_URL='<Supabase session-pooler URI>' ./.venv/bin/python scripts/migrate.py
+```
+
+If a migration was run by hand in the Supabase SQL editor, record it under its **exact file name** (the runner skips by name; a wrong name makes Render re-run the file on the next deploy). Use the file's SHA-256 as the checksum:
+
+```bash
+shasum -a 256 migrations/158_platform_switches.sql
+```
+
+```sql
+INSERT INTO schema_migrations (name, checksum) VALUES ('158_platform_switches.sql', '<sha256 from above>')
+ON CONFLICT (name) DO UPDATE SET checksum = EXCLUDED.checksum;
+```
 
 ### Corporate Health (migration 095) — switching it on for a diagnostic centre
 
@@ -118,6 +150,7 @@ Before onboarding, identify which plan matches the client's facility. Each plan 
 | `ivf` | IVF & Fertility Centre | Fertility + own hormone/semen tests | `/ivf-panel` | 2,500 |
 | `multispecialty` | Multi-Specialty Hospital | General hospital + treatments catalogue | `/hospital-panel` | 5,000 |
 | `womenchild` | Women & Child Hospital | Child Care + Women Care + Fertility Care | `/women-child-panel` | 5,000 |
+| `pharmacy` | *(not in this dropdown — use **+ Create pharmacy**)* | Standalone medical store / chain: no doctors, no booking | `/admin-panel` | 1,000 |
 
 \* Defaults from the `plan_tiers` table; the owner can change them in Platform → Plan Tiers. Dental sitting messages are counted separately (Platform → Dental Messaging).
 
@@ -135,6 +168,8 @@ Before onboarding, identify which plan matches the client's facility. Each plan 
 | Razorpay payments | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Insights / analytics, feedback | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Dental Treatment Plans | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+
+**`pharmacy` plan:** none of the rows above except multi-branch and Razorpay. Its work runs in Pharmacy OS (stores, purchase, POS, registers, refill reminders), which the pharmacy wizard switches on at create.
 
 **Patient WhatsApp main menu — how it is built (`conversation._send_main_menu`)**
 
@@ -265,6 +300,8 @@ Templates are required for any proactive outbound message sent outside the 24-ho
 | `opd_receipt` | UTILITY | Clinics with OPD OS enabled (`receipt`) | 3 | When cashier records invoice receipt at billing counter |
 | `opd_payment_link` | UTILITY | Clinics with OPD OS enabled (`payment_link`) | 3 | When cashier dispatches online payment link for bill |
 | `prescription_ready` | UTILITY (DOCUMENT header) | Clinics with OPD OS enabled (`prescription_ready`) | 0 | Prescription PDF delivery when outside 24h window |
+| `cc_consent_invite_v1`, `cc_care_card_v1`, `cc_reading_request_v1`, `cc_lab_due_v1`, `cc_visit_due_v1`, `cc_phq_start_v1`, `cc_visit_booked_v1`, `cc_service_ended_v1` | UTILITY + quick replies | Any clinic with **Continuous Care** on | 6 · 4 · 3 · 3 · 3 · 2 · 6 · 3 | Care programme messages. **Do not type these by hand** — clinic admin → Continuous Care → Setup → **Submit templates** (`POST /admin/cc/templates/submit`) sends the exact bodies; the Setup checklist shows `n/8 approved` |
+| `rx_refill_due_v1` | UTILITY + 2 quick replies (*Request refill* / *Stop refill reminders*) | Any clinic with **Pharmacy OS** refill reminders | 4 (pharmacy name, medicine, last fill date, run-out date) | Refill reminder before the medicine runs out |
 | `opt_out_confirmation` | UTILITY | Optional (all plans) | — | **Not sent by the code today** — STOP/deletion replies go out as normal chat messages inside the 24h window. Register only if the client wants them on file. |
 | `data_deletion_confirmation` | UTILITY | Optional (all plans) | — | Same as above |
 
@@ -642,9 +679,12 @@ Use this checklist to confirm which templates to register per plan:
 | 19 | `opd_receipt` | — | — | — | — | — | — | — | — | — | — | — | ✅ *(if OPD on)* |
 | 20 | `opd_payment_link` | — | — | — | — | — | — | — | — | — | — | — | ✅ *(if OPD on)* |
 | 21 | `prescription_ready` | — | — | — | — | — | — | — | — | — | — | — | ✅ *(if OPD on)* |
+| 22 | `cc_*` (8 templates, admin **Submit templates** button) | — | — | — | — | — | — | — | — | — | — | — | ✅ *(if Continuous Care on)* |
+| 23 | `rx_refill_due_v1` | — | — | — | — | — | — | — | — | — | — | — | ✅ *(if Pharmacy OS on; also the `pharmacy` plan)* |
 
 ⚪ = optional: not sent by the code today.  
-OPD OS templates (17–21) are required for any clinic or hospital where the OPD OS module is enabled (`opd_enabled = true`).
+OPD OS templates (17–21) are required for any clinic or hospital where the OPD OS module is enabled (`opd_enabled = true`).  
+**`pharmacy` plan:** only #23 (plus the optional #9/#10). It has no booking, reminder or lab-report templates.
 
 ---
 
@@ -879,7 +919,7 @@ curl -X POST "https://graph.facebook.com/v22.0/<PHONE_NUMBER_ID>/register" \
 
 ### Step 13: Create the Clinic / Hospital
 1. Open Kriya AI Platform Panel: `https://medassist-ai-docker.onrender.com/platform-panel` and sign in with the owner credentials (`OWNER_USERNAME` / `OWNER_PASSWORD`).
-2. Click **Create Hospital / Clinic** and fill in (these are the exact fields of the form):
+2. Click **Create Hospital / Clinic** and fill in (these are the exact fields of the form). **Pharmacy plan:** click **+ Create pharmacy** instead and go to Step 13p.
 
 | Field | Required | Value / example | Stored as |
 |---|---|---|---|
@@ -907,10 +947,50 @@ curl -X POST "https://graph.facebook.com/v22.0/<PHONE_NUMBER_ID>/register" \
 | Cloud API activation | Calls Meta `POST /{phone_number_id}/register` with PIN `123456`. If the phone later shows *Pending*, run Step 11's manual command. |
 | Admin login | One `clinic_admin` account (username = name slug + random suffix, random 16-char password). |
 | Starter treatments | derma / eye / dental / ivf: the specialty's starter list, seeded **hidden**. womenchild: Child Care, Women Care and Fertility Care lists, hidden. multispecialty: none (admin loads lists from the starter picker). |
+| Modules | **None switched on.** Every operating system (OPD, IPD, Diagnostic, Pharmacy, Care, Specialty…) is off until the owner applies Step 13c. Exception: the pharmacy wizard switches Pharmacy OS on. |
 | Nothing else | No doctors, prices, templates or payments are created — Part E does that. |
 
 > [!CAUTION]
 > Each clinic must have its **own** Meta Phone Number ID. Reusing another clinic's ID is refused (HTTP 409) — it is what routes incoming messages to the right clinic.
+
+### Step 13p: Create a Pharmacy (plan `pharmacy` only)
+
+Owner panel → **+ Create pharmacy** (3 steps → `POST /platform/pharmacies`):
+
+| Step | Fields | Rule |
+|---|---|---|
+| 1 · Business | Name, WhatsApp number (E.164), Meta Phone Number ID, access token, WABA ID, GSTIN (optional, validated), phone, address | same Meta values as Step 13 |
+| 2 · Shops | One row per shop: name + **drug licence number** (1–20 shops) | each becomes a retail store `SHOP1…` that can sell and receive GRN |
+| 3 · Pharmacist | Pharmacist on duty: name + registration number | Drugs & Cosmetics Rules 1945 |
+
+Result: the clinic row + admin login (same as Step 13), **Pharmacy OS ON with `rx_state = ACTIVE`** (no OPD needed on this plan), the stores, the pharmacist in `rx_settings`, the GSTIN in `opd_settings`. Audited as `create_pharmacy`. Then do Step 13c (Revenue Guard and Kriya Ketu are recommended) and Part K3.
+
+### Step 13c: Suggested Setup — switch on the plan's modules (every plan)
+
+The result screen has **Set up modules for this plan**; or open the clinic → **Suggested setup** card. It lists each module the plan can have: **recommended ones are pre-ticked**, optional ones unticked. **Nothing is switched on until the owner clicks Apply selected** — the owner decides. Apply runs each module through the normal owner toggle in dependency order (OPD → IPD → Diagnostic → Pharmacy → Care → Specialty → packs → Revenue Guard → Data import → Kriya Ketu → AI receptionist → Corporate Health), so eligibility, provisioning and audit are the same as switching it on by hand. Continuous Care and the AI receptionist ask for the clinic's name to be typed.
+
+| Plan | Recommended (pre-ticked) | Optional |
+|---|---|---|
+| `soloclinic` | OPD · Care · Kriya Ketu · AI receptionist | Pharmacy · Revenue Guard · Data import |
+| `essential` | OPD · Pharmacy · Care · Revenue Guard · Kriya Ketu · AI receptionist | Diagnostic · Data import |
+| `polyclinic` | OPD · Pharmacy · Care · Revenue Guard · Kriya Ketu · AI receptionist · Diagnostic | **IPD** (only if the centre admits patients) · Data import |
+| `enterprise` | hospital core¹ · IPD · Diagnostic · Specialty OS | all 6 specialty packs · Corporate Health · Data import |
+| `multispecialty` | hospital core¹ · IPD · Diagnostic · Specialty OS | all 6 specialty packs · Data import |
+| `womenchild` | hospital core¹ · IPD · Diagnostic · Specialty OS · Antenatal · Immunisation | IVF lab · Data import |
+| `eye` | hospital core¹ · Specialty OS · Eye/optical | IPD · Data import |
+| `dental` | OPD · Care · Revenue Guard · Kriya Ketu · AI receptionist · Specialty OS · Dental chart | Pharmacy · Data import |
+| `derma` | hospital core¹ · Specialty OS · Derma | Data import |
+| `ivf` | hospital core¹ · Diagnostic · Specialty OS · IVF lab | IPD · Data import |
+| `diagstream` | **Diagnostic only** + Revenue Guard · Kriya Ketu · AI receptionist | Corporate Health · Data import |
+| `diagbooking` | **Diagnostic only** + Kriya Ketu · AI receptionist | Revenue Guard · Corporate Health · Data import |
+| `pharmacy` | Pharmacy (already on from the wizard) · Revenue Guard · Kriya Ketu | AI receptionist · Data import |
+
+¹ hospital core = OPD · Pharmacy · Care · Revenue Guard · Kriya Ketu · AI receptionist. Source of truth: `PLAN_MODULE_TEMPLATES` in `app/services/tenant.py`.
+
+Below the modules the card shows **OPD setup n/14** once OPD is on. OPD starts in **CONFIGURING**: until go-live the clinic admin sees only the OPD Setup page — that is expected, not "missing modules". Finish Part I and every OPD page appears.
+
+> [!NOTE]
+> Diagnostic plans never get OPD, IPD, Pharmacy or Care (they need doctor booking). Polyclinic never gets IPD unless the owner ticks it. A module the plan cannot have is not listed.
 
 ### Step 13b: Post-Create Settings Only Set by SQL (Supabase → SQL Editor)
 
@@ -952,6 +1032,7 @@ FROM clinics WHERE id = '<CLINIC_UUID>';
 | `derma` / `eye` / `dental` / `ivf` | — | — | specialty starter treatments (hidden) |
 | `multispecialty` | `lab_report_ready_v1` | `admin_alert_v1` | nothing (starter picker in admin) |
 | `womenchild` | `lab_report_ready_v1` | `admin_alert_v1` | Child / Women / Fertility lists (hidden) |
+| `pharmacy` | — | — | stores, pharmacist, Pharmacy OS ACTIVE (Step 13p) |
 
 ---
 
@@ -1523,6 +1604,50 @@ Walk the clinic team through their daily workflow:
    - Generates Invoice $\rightarrow$ Patient pays via Cash, UPI QR, or Card $\rightarrow$ Cashier clicks **Record Receipt**.
    - Patient receives `opd_receipt` on WhatsApp.
    - At end of day, Cashier enters declared cash and clicks **Close Shift** for shift-end audit.
+
+---
+
+## Part K: Module Go-Live (every module switched on in Step 13c)
+
+Each module has its own setup page in the clinic admin panel with a checklist. Work it until every item is green. A module that is ON but not finished does nothing to patients.
+
+| # | Module | Admin page / API | Must be true before go-live |
+|---|---|---|---|
+| K1 | **IPD OS** (needs OPD live) | IPD → Setup (`/admin/ipd/setup`) | Wards and beds created; IPD settings saved; nursing / doctor staff have IPD grants |
+| K2 | **Diagnostic OS** | Diagnostic → Setup (`/admin/dx/setup`) → **Go live** (`POST /admin/dx/go-live`) | Sites, departments, containers, signatories, settings — all ✅ |
+| K3 | **Pharmacy OS** (needs OPD, except plan `pharmacy`) | Pharmacy → Setup (`/admin/rx/setup`) | Stores (with drug licence), drug master items, GSTIN, settings; `rx_refill_due_v1` APPROVED if refill reminders are used |
+| K4 | **Continuous Care** (needs OPD) | Continuous Care → Setup (`/admin/cc/setup`) | Reply hours · emergency number · 8 `cc_*` templates APPROVED (**Submit templates** button) · consent notice · a doctor-signed protocol · ≥1 care-coordinator login · **monthly care message limit set by the owner** · lab tests mapped (HbA1c, TSH…) · safety card texts approved |
+| K5 | **Specialty OS** + packs (needs OPD) | Specialty (`/admin/sp/status`) | Specialty OS on first, then the plan's pack (Eye/optical, Dental chart, Derma, IVF lab, Antenatal, Immunisation) |
+| K6 | **Revenue Guard** (needs a billing module) | Revenue Guard page | Nothing to configure; runs nightly and lists unbilled charges |
+| K7 | **Data import** ("Switch to Kriya") | Data import (`/admin/mi`) | Upload the old system's export, review the dry run, then import |
+| K8 | **Kriya Ketu** | assistant in the panel | Nothing to configure |
+
+The owner sees each module's state and the reason a module cannot be switched on under its toggle (Feature Overrides). Switching a module off with open work (admitted patients, unsettled bills, active care enrolments) asks for confirmation and winds it down: existing work finishes, nothing new starts.
+
+---
+
+## Part L: Changes After Go-Live (owner panel)
+
+### L1: Change a clinic's plan (any plan → any plan)
+
+Clinic → **Suggested setup** card → plan selector → the preview shows exactly what will happen (`GET /platform/clinics/{id}/plan-change-preview?plan=`):
+- **Switched off**: modules the new plan cannot have (dependants first, e.g. Care before OPD).
+- **Features gained / lost**, and **plan-feature overrides reset** (the new plan's defaults apply).
+- **Recommended** modules of the new plan (*Then switch on the new plan's recommended modules* is ticked by default).
+
+Click **Change plan**, type the clinic name (`PUT /platform/clinics/{id}/plan`). Refused, with nothing written, when: the name is wrong, the plan is the same, or OPD would be dropped while IPD, Care or Pharmacy still has open work (409). Other open work needs the wind-down confirmation. On success: plan + features updated, dropped modules wound down through the normal toggle, the new plan's starter lists seeded (specialty treatments), caches cleared, audited as `change_clinic_plan`. Re-check Part C templates and Part E for the new plan afterwards.
+
+### L2: CallMedex integration switch
+
+Owner panel → **CallMedex** section. **Off by default** (migration 158). While off, every CallMedex ↔ Kriya connection is inactive: CallMedex API routes answer 503, no outbound calls or status callbacks, queued jobs are marked `integration_disabled`, and WhatsApp messages to the CallMedex number are ignored. Turning it on or off is the owner's decision, takes effect within 30 seconds and is audited (`set_callmedex_integration`).
+
+### L3: Offboarding — delete or erase a clinic
+
+Clinic → **Delete**. Two modes:
+- **Erase permanently** (ticked by default): type the clinic name. Every row of that clinic in every table and its files in the `lab-reports` storage bucket (`<clinic_id>/…`) are removed; all-or-nothing (`kriya_erase_clinic`, migration 157). **Cannot be undone** — export what the client needs first (Admin → Data & Support → export).
+- Untick for the old **soft delete** (deactivates, keeps data).
+
+Never erase the test tenant used for plan verification (Aura Hospital).
 
 ---
 

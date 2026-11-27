@@ -181,3 +181,15 @@ async def test_basic_auth_still_works_without_a_cookie():
         )
     assert got.username == "drpatel"
     auth_pw.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_session_lookup_db_error_is_503_not_a_logout():
+    """A database blip is not an expired session: a 401 makes the panel force-log the user out."""
+    from fastapi import HTTPException
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.is_.return_value.execute.side_effect = \
+        Exception("connection reset")
+    with patch("app.routers.admin.supabase", mock_sb), pytest.raises(HTTPException) as exc:
+        await resolve_admin_session("tok")
+    assert exc.value.status_code == 503

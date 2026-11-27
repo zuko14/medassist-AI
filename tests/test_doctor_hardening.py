@@ -82,3 +82,20 @@ def test_branch_assign_needs_a_uuid():
     with pytest.raises(ValidationError):
         DoctorBranchAssign(doctor_id="not-a-uuid")
     assert DoctorBranchAssign(doctor_id="33333333-3333-3333-3333-333333333333").session == "both"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["23503", "23514"])
+async def test_deleting_a_doctor_with_visits_is_409_not_500(code):
+    """Regression: the delete nulls appointments.doctor_id; an OPD visit's CHECK (23514) refused it and the
+    route answered a bare 500 instead of 'deactivate instead'."""
+    from fastapi import HTTPException
+    from app.routers.admin import delete_doctor
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = \
+        MagicMock(data=[dict(STORED)])
+    mock_sb.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.side_effect = \
+        Exception({"message": "violates constraint", "code": code})
+    with patch("app.routers.admin.supabase", mock_sb), pytest.raises(HTTPException) as exc:
+        await delete_doctor("doc-1", clinic_id="default", user=ADMIN)
+    assert exc.value.status_code == 409 and "deactivate" in exc.value.detail

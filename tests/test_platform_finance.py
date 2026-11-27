@@ -580,3 +580,20 @@ def test_invoice_generation_is_idempotent_and_skips_inactive_clinics(
     # derma list price Rs 6,000 x 2 active branches
     assert inserted["rows"][0]["amount_paise"] == 1_200_000
     assert inserted["rows"][0]["locations_billed"] == 2
+
+
+@patch("app.routers.platform._fetch_clinic_branch_counts", new_callable=AsyncMock, return_value={})
+@patch("app.services.platform_finance.fetch_billing_rates", new_callable=AsyncMock)
+@patch("app.services.message_accounting._get_plan_tiers", new_callable=AsyncMock, return_value={})
+@patch("app.routers.platform.supabase")
+def test_rates_list_answers_with_clinics_and_puts_overrides_first(mock_supabase, _tiers, mock_rates, _branches):
+    """Regression: the listing sorted on `rate_source`, a key it never set, so it 500'd for any clinic."""
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+        {"id": "a", "name": "Alpha", "plan": "derma", "is_active": True},
+        {"id": "b", "name": "Beta", "plan": "derma", "is_active": True},
+    ]
+    mock_rates.return_value = {"b": {"rate_paise": 500_000, "billing_mode": "flat"}}
+    res = client.get("/platform/finance/rates", headers=_auth())
+    assert res.status_code == 200, res.text
+    rows = res.json()["rates"]
+    assert [(r["clinic_id"], r["rate_source"]) for r in rows] == [("b", "override"), ("a", "plan_default")]

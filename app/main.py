@@ -299,6 +299,21 @@ app = FastAPI(
     openapi_url=None if is_production else "/openapi.json",
 )
 
+
+from postgrest.exceptions import APIError as _PostgrestAPIError
+from fastapi.responses import JSONResponse
+
+
+@app.exception_handler(_PostgrestAPIError)
+async def _postgrest_error_handler(request: Request, exc: _PostgrestAPIError):
+    """A malformed id in a path or body (e.g. /invoices/not-a-uuid) reaches Postgres as an invalid UUID cast
+    (SQLSTATE 22P02) and used to surface as a 500 on every id route. It is the caller's bad input: answer 422.
+    Every other database error is still a server fault and stays a plain 500, logged with its route."""
+    if getattr(exc, "code", None) == "22P02":
+        return JSONResponse(status_code=422, content={"detail": "Invalid identifier."})
+    logger.error(f"Unhandled database error on {request.method} {request.url.path}: {exc}")
+    return PlainTextResponse("Internal Server Error", status_code=500)
+
 # CORS middleware — restricted to same-origin for security
 # The admin panel is served from the same domain, so no cross-origin needed.
 # If you deploy the admin panel separately, add that domain here.

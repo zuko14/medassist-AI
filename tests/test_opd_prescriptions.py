@@ -171,6 +171,26 @@ async def test_save_prescription_draft_replaces_items():
         app.dependency_overrides.pop(admin.verify_credentials, None)
 
 
+@pytest.mark.asyncio
+async def test_saving_after_sign_is_409_not_a_duplicate_version_500():
+    """Regression: no draft left (it was signed) used to insert a second version 1 -> unique violation -> 500."""
+    app.dependency_overrides[admin.verify_credentials] = lambda: TREATING_DOC_USER
+    enc = {"id": ENCOUNTER_ID, "clinic_id": CLINIC_ID, "appointment_id": APPOINTMENT_ID,
+           "patient_id": PATIENT_ID, "doctor_id": DOCTOR_ID, "status": "signed"}
+    try:
+        with patch("app.routers.opd.get_clinic_by_id", AsyncMock(return_value=MOCK_CLINIC)), \
+             patch("app.services.opd_clinical.sb") as mock_sb:
+            mock_sb.side_effect = [MagicMock(data=enc), MagicMock(data=[]), MagicMock(data=[{"id": RX_ID}])]
+            res = client.put(f"/admin/opd/encounters/{ENCOUNTER_ID}/prescription",
+                             json={"items": [{"drug_name": "Paracetamol", "formulation": "tablet",
+                                              "dosage": "1", "frequency": "OD"}]})
+            assert res.status_code == 409, res.text
+            assert res.json()["detail"]["error"] == "prescription_signed"
+            assert mock_sb.call_count == 3          # nothing inserted
+    finally:
+        app.dependency_overrides.pop(admin.verify_credentials, None)
+
+
 # ─── 3. SIGNING & RECOMPUTED WARNING ACKNOWLEDGEMENTS ───────────────────────
 
 

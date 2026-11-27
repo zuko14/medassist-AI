@@ -1291,7 +1291,7 @@
                     <div class="toolbar-left">
                         <div class="search-box">
                             <span class="search-icon"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-search"/></svg></span>
-                            <input type="text" id="searchInput" placeholder="Search hospital name or WhatsApp..." onkeyup="filterLeaderboard()">
+                            <input type="text" id="searchInput" placeholder="Search hospital name or WhatsApp..." oninput="filterLeaderboard()">
                         </div>
                         <select class="filter-select" id="planFilter" onchange="filterLeaderboard()">
                             <option value="ALL">All Subscription Tiers</option>
@@ -2750,7 +2750,7 @@
                         <span style="font-size:0.82rem; font-weight:700; color:var(--text2); text-transform:uppercase;">Select Target Clinics:</span>
                         <button type="button" class="action-btn" style="padding:4px 8px; font-size:0.75rem;" onclick="toggleSelectAllClinics()">Toggle All</button>
                     </div>
-                    <input type="text" id="bcClinicSearch" class="form-control" placeholder="Filter clinics..." style="margin-bottom:10px; font-size:0.82rem; padding:6px 10px;" onkeyup="filterBroadcastClinics()">
+                    <input type="text" id="bcClinicSearch" class="form-control" placeholder="Filter clinics..." style="margin-bottom:10px; font-size:0.82rem; padding:6px 10px;" oninput="filterBroadcastClinics()">
                     <div id="bcClinicList" style="max-height:160px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;">
                         <!-- Checkboxes populated dynamically -->
                     </div>
@@ -2823,7 +2823,7 @@
             <div class="form-group" style="margin-bottom:20px;">
                 <label style="color:#fca5a5;">Security Confirmation</label>
                 <p style="font-size:0.8rem; color:var(--text2); margin-bottom:8px;" id="deleteConfirmHint">Type <strong style="color:#fff; letter-spacing:0.5px;">CONFIRM DELETE</strong> below to proceed:</p>
-                <input type="text" class="form-control" id="deleteConfirmInput" placeholder="CONFIRM DELETE" onkeyup="checkDeleteConfirmInput()" style="border-color:rgba(239,68,68,0.4); text-transform:uppercase;">
+                <input type="text" class="form-control" id="deleteConfirmInput" placeholder="CONFIRM DELETE" oninput="checkDeleteConfirmInput()" style="border-color:rgba(239,68,68,0.4); text-transform:uppercase;">
             </div>
 
             <div style="display:flex; gap:12px;">

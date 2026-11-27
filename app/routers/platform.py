@@ -3940,6 +3940,7 @@ async def get_finance_rates(
                 "monthly_price_paise", 0
             ),
             **rate,
+            "rate_source": rate["source"],   # the dashboard's key (same as /platform/finance rows)
         })
 
     rows.sort(key=lambda r: (r["rate_source"] != "override", r["clinic_name"] or ""))

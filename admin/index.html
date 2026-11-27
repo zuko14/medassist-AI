@@ -4277,7 +4277,7 @@
             </div>
             <!-- RX:pos:END -->
             <!-- RX:ipd:START -->
-            <div class="nav-link" tabindex="0" data-page="rxindents" data-rx="nav RX_READ RX_DISPENSE IPD_NURSING RX_ADMIN" style="display:none" onclick="go('rxindents',this)">
+            <div class="nav-link" tabindex="0" data-page="rxindents" data-rx="nav ipd RX_READ RX_DISPENSE IPD_NURSING RX_ADMIN" style="display:none" onclick="go('rxindents',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21V9l9-6 9 6v12"></path><path d="M9 21v-6h6v6"></path><path d="M12 7v4M10 9h4"></path></svg></span><span>Ward Indents</span>
             </div>
             <!-- RX:ipd:END -->
@@ -8702,7 +8702,7 @@
             <div class="rxd-tiles" id="rxdTiles" aria-live="polite"></div>
             <div class="rxd-links" aria-label="Pharmacy pages">
                 <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.open('rxpos')">Pharmacy POS</button>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.open('rxindents')">Ward Indents</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-rx="nav ipd" onclick="rxdash.open('rxindents')">Ward Indents</button>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.open('rxrefills')">Refills &amp; Alerts</button>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.open('rxstock')">Stock &amp; Expiry</button>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="rxdash.open('rxregisters')">Drug Registers</button>
@@ -11189,7 +11189,8 @@ function applyRxGates() {
     document.querySelectorAll('[data-rx]').forEach(el => {
         const tokens = (el.dataset.rx || '').split(' ');
         const perms = tokens.filter(t => t.startsWith('RX_') || t.startsWith('IPD_'));
-        const on = !!myRx && (!perms.length || perms.some(rxCan));
+        // 'ipd': ward indents need IPD too; without it the page only ever answered 403
+        const on = !!myRx && (!tokens.includes('ipd') || !!myIpd) && (!perms.length || perms.some(rxCan));
         if (tokens[0] === 'role') { el.hidden = !myRx; return; }
         el.style.display = on ? '' : 'none';
         const cb = el.querySelector && el.querySelector('input[type="checkbox"]');
@@ -19274,11 +19275,12 @@ async function loadCasualty() {
         }).join('');
     }
     clearTimeout(emg.timer);
-    emg.timer = setTimeout(() => {   // live board: refresh while the page is on screen and no dialog is open
-        if (document.getElementById('pg-casualty')?.classList.contains('on') && !document.hidden
-            && !document.querySelector('.modal-overlay.open')) loadCasualty();
-        else emg.timer = setTimeout(loadCasualty, 30000);
-    }, 30000);
+    const tick = () => {   // live board: refresh while the page is on screen and no dialog is open
+        if (!document.getElementById('pg-casualty')?.classList.contains('on')) return;   // left: opening the page reloads it
+        if (document.hidden || document.querySelector('.modal-overlay.open')) { emg.timer = setTimeout(tick, 30000); return; }
+        loadCasualty();
+    };
+    emg.timer = setTimeout(tick, 30000);
 }
 
 function emgFilter(k) { emg.filter = emg.filter === k ? '' : k; loadCasualty(); }
@@ -21466,6 +21468,7 @@ async function switchClinic() {
     // clinic. The server refuses it, but the panel should never offer it.
     resetLabTestBranchState();
     resetConnectorBranchState();
+    resetModuleCaches();
     insightsBranchesLoaded = false;
     insightsBranchId = null;
     corpResetState();
@@ -21513,6 +21516,7 @@ function logout() {
     // Tenant-specific branch caches; see switchClinic().
     resetLabTestBranchState();
     resetConnectorBranchState();
+    resetModuleCaches();
     insightsBranchesLoaded = false;
     insightsBranchId = null;
     document.getElementById('app').classList.remove('open');
@@ -21613,6 +21617,7 @@ function forceRelogin(message) {
     // Tenant-specific branch caches; see switchClinic().
     resetLabTestBranchState();
     resetConnectorBranchState();
+    resetModuleCaches();
     insightsBranchesLoaded = false;
     insightsBranchId = null;
     document.getElementById('app').classList.remove('open');
@@ -26566,6 +26571,8 @@ function vcCallRows(calls, emptyText) {
 async function vcLive() {
     const pane = document.getElementById('vcPane');
     const draw = async () => {
+        // Left the page (or signed out): stop, or this 5 s poll ran on every other page for the rest of the session.
+        if (!document.getElementById('pg-voice').classList.contains('on') || !myVoice) { clearInterval(vcState.liveTimer); return; }
         try {
             const d = await api('/admin/voice/live');
             if (vcState.tab !== 'live') return;
@@ -27494,6 +27501,15 @@ let cwBranchId = null;
 //: 'branch' when this branch keeps its own hours, 'clinic'/'default' when it
 //: is inheriting. Decides whether the override can be cleared.
 let cwSource = null;
+
+// Module lists loaded once per page and keyed to the tenant. Kept across a sign-out or clinic switch, the next
+// login's pages used the previous clinic's stores/tests ("Store not found." on Purchase until a full refresh).
+function resetModuleCaches() {
+    rxpur.stores = []; rxpur.suppliers = []; rxpur.items = {};
+    rxtr.stores = []; rxref.stores = null;
+    dxcollect.reasons = null; dxlog.tests = null; dxlog.depts = null;
+    dxtpl.loaded = false; dxb2b.accounts = []; ins.payers = [];
+}
 
 function resetConnectorBranchState() {
     _connectorBranchesLoaded = false;
